@@ -392,7 +392,7 @@ function exportarPlanRuteo() {
     XLSX.utils.book_append_sheet(wb, ws3, "Resumen");
   }
 
-  XLSX.writeFile(wb, `1. Simpliroute_Plan_${fechaHoy()} RUTEO.xlsx`);
+  XLSX.writeFile(wb, `1. Simpliroute_Plan_${fechaHoy()+1} RUTEO.xlsx`);
   const extra = sinMatriz.size ? ` · ${sinMatriz.size} vehículo/s sin matriz (VEH FINAL = VEH INICIAL): ${[...sinMatriz].join(', ')}` : '';
   addLog(`Plan RUTEO exportado (${planData.length} filas)${extra}`, "ok");
 }
