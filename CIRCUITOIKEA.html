@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Circuito Carga IKEA</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#F7F7F8; --bgCard:#FFFFFF; --bgCardAlt:#F4F4F5; --bgHover:rgba(0,0,0,0.03);
+  --border:#E4E4E7; --borderSoft:#EEEEEF; --borderFocus:#2563EB;
+  --text:#18181B; --textSub:#52525B; --textFaint:#A1A1AA;
+  --blue:#2563EB; --green:#16A34A; --orange:#EA580C; --red:#DC2626; --purple:#7C3AED;
+  --pasteBlue:rgba(37,99,235,0.08); --pasteGreen:rgba(22,163,74,0.08); --pasteOrange:rgba(234,88,12,0.08);
+  --font-mono:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;
+  --r-sm:6px; --r-md:10px;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif;font-size:13px;min-height:100vh;}
+header{background:var(--bgCard);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:20;}
+.app-icon{width:26px;height:26px;border-radius:7px;background:var(--blue);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.app-title{font-weight:800;font-size:13px;letter-spacing:0.02em;}
+.app-sub{font-size:10px;color:var(--textFaint);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:2px;}
+main{max-width:1080px;margin:0 auto;padding:24px;}
+.card{background:var(--bgCard);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:0 1px 2px rgba(0,0,0,0.03);}
+.controls{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-end;padding:18px 20px;margin-bottom:20px;}
+.field{display:flex;flex-direction:column;gap:6px;}
+.field-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--textFaint);}
+.drop-zone{display:flex;align-items:center;gap:10px;border:1.5px dashed var(--border);border-radius:var(--r-sm);padding:9px 16px;cursor:pointer;transition:border-color .15s,background .15s;background:var(--bgCardAlt);min-width:260px;}
+.drop-zone:hover{border-color:var(--borderFocus);background:var(--pasteBlue);}
+.drop-zone input{display:none;}
+.drop-zone .file-name{font-family:var(--font-mono);font-size:11px;color:var(--textSub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;}
+input[type=date]{border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 12px;font-family:var(--font-mono);font-size:12px;color:var(--text);background:var(--bgCard);outline:none;}
+input[type=date]:focus{border-color:var(--borderFocus);box-shadow:0 0 0 2.5px rgba(37,99,235,0.10);}
+.btn{border:none;border-radius:var(--r-sm);padding:9px 18px;font-size:11px;font-weight:700;cursor:pointer;transition:opacity .15s;font-family:inherit;}
+.btn:disabled{opacity:0.4;cursor:not-allowed;}
+.btn-primary{background:var(--blue);color:#fff;}
+.btn-primary:hover:not(:disabled){opacity:0.88;}
+.hint{font-size:11px;color:var(--textFaint);padding:0 20px 16px;}
+.summary-pill{font-family:var(--font-mono);font-size:10px;color:var(--textSub);background:var(--bgCardAlt);border:1px solid var(--borderSoft);border-radius:999px;padding:4px 12px;}
+.day-card{margin-bottom:16px;overflow:hidden;}
+.day-header{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--borderSoft);background:linear-gradient(to right,var(--pasteBlue),transparent 60%);}
+.day-name{font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;}
+.day-date{font-family:var(--font-mono);font-size:11px;color:var(--textSub);}
+.day-count{font-family:var(--font-mono);font-size:10px;color:var(--textFaint);}
+table{width:100%;border-collapse:collapse;font-size:12px;}
+th{padding:7px 16px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--textFaint);font-weight:700;background:var(--bgCardAlt);border-bottom:1px solid var(--borderSoft);}
+td{padding:7px 16px;border-bottom:1px solid var(--borderSoft);}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:var(--bgHover);}
+.hora{font-family:var(--font-mono);font-weight:700;color:var(--blue);white-space:nowrap;}
+.ct{font-weight:700;}
+.transporte{color:var(--textSub);font-size:11px;}
+.obs{color:var(--textFaint);font-size:11px;font-style:italic;}
+.empty-day{padding:14px 16px;color:var(--textFaint);font-size:11px;font-style:italic;}
+.empty-state{text-align:center;padding:70px 20px;color:var(--textFaint);}
+.empty-title{font-weight:700;font-size:14px;color:var(--textSub);margin-bottom:6px;}
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--text);color:#fff;padding:10px 20px;border-radius:var(--r-sm);font-size:12px;font-weight:600;opacity:0;transition:all .25s;z-index:100;pointer-events:none;}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+#outlook-wrap{position:absolute;left:-9999px;top:0;}
+@media (max-width:640px){ .controls{flex-direction:column;align-items:stretch;} }
+</style>
+</head>
+<body>
+<header>
+  <div class="app-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+  <div>
+    <div class="app-title">CIRCUITO CARGA IKEA</div>
+    <div class="app-sub">CT Destino ordenados por hora · semanal</div>
+  </div>
+</header>
+
+<main>
+  <div class="card controls">
+    <div class="field">
+      <span class="field-label">Circuito actualizado (XLSX)</span>
+      <label class="drop-zone">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+        <span class="file-name" id="fileName">Seleccionar archivo</span>
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+      </label>
+    </div>
+    <div class="field">
+      <span class="field-label">Fecha inicio de semana (Lunes)</span>
+      <input type="date" id="weekStart">
+    </div>
+    <button class="btn btn-primary" id="btnCopy" disabled>Copiar Tabla</button>
+    <span class="summary-pill" id="summary">Sin datos</span>
+  </div>
+  <p class="hint">Se filtra la columna BODEGA dejando solo "Carga IKEA". La columna Fecha corresponde al día anterior a cada día de la semana (el lunes considera el sábado anterior). Si la fecha elegida no es lunes, se ajusta automáticamente al lunes de esa semana.</p>
+
+  <div id="results">
+    <div class="empty-state card">
+      <div class="empty-title">Carga el archivo de circuito</div>
+      <div>Sube el Excel y elige la fecha de inicio de semana para ver los CT Destino ordenados por hora, día por día.</div>
+    </div>
+  </div>
+</main>
+
+<div id="outlook-wrap"></div>
+<div id="toast"></div>
+
+<script>
+const DAY_COLS = ['LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO','DOMINGO'];
+let rawRows = null;   // filas del excel (json)
+let ikeaRows = null;  // solo Carga IKEA
+
+function showToast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2500);
+}
+function cleanStr(s){ return s?String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim():''; }
+function getKey(row,name){
+  if(row[name]!==undefined)return row[name];
+  const target=cleanStr(name).replace(/\s/g,'');
+  const k=Object.keys(row).find(k=>cleanStr(k).replace(/\s/g,'')===target);
+  return k!==undefined?row[k]:undefined;
+}
+function pad(n){return String(n).padStart(2,'0');}
+
+/* Convierte el valor de una celda de horario a texto legible.
+   Soporta "18:00 a 20:00", "11:00", hora Excel (fracción 0-1) y Date. */
+function horaTexto(v){
+  if(v===null||v===undefined||v==='')return'';
+  if(v instanceof Date)return pad(v.getHours())+':'+pad(v.getMinutes());
+  if(typeof v==='number'&&v>=0&&v<1){
+    const totalMin=Math.round(v*24*60);
+    return pad(Math.floor(totalMin/60)%24)+':'+pad(totalMin%60);
+  }
+  return String(v).trim();
+}
+/* Minutos de la primera hora que aparezca en el texto (para ordenar) */
+function horaInicioMin(txt){
+  const m=String(txt).match(/(\d{1,2}):(\d{2})/);
+  if(!m)return 24*60+1;
+  return parseInt(m[1])*60+parseInt(m[2]);
+}
+
+function handleFile(e){
+  const file=e.target.files[0]; if(!file)return;
+  document.getElementById('fileName').textContent=file.name;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const wb=XLSX.read(ev.target.result,{type:'binary',cellDates:true});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      rawRows=XLSX.utils.sheet_to_json(ws,{defval:''});
+      ikeaRows=rawRows.filter(r=>cleanStr(getKey(r,'BODEGA'))==='CARGA IKEA');
+      if(!ikeaRows.length){
+        showToast('No se encontraron filas con BODEGA = Carga IKEA');
+        document.getElementById('summary').textContent='0 filas Carga IKEA';
+        render(); return;
+      }
+      const cts=new Set(ikeaRows.map(r=>cleanStr(getKey(r,'CT DESTINO'))).filter(Boolean));
+      document.getElementById('summary').textContent=`${ikeaRows.length} filas · ${cts.size} CT Destino`;
+      showToast(`✓ ${ikeaRows.length} filas Carga IKEA procesadas`);
+      render();
+    }catch(err){
+      console.error(err);
+      showToast('Error al leer el archivo');
+    }
+  };
+  reader.readAsBinaryString(file);
+  e.target.value='';
+}
+
+/* Lunes de la semana de la fecha elegida */
+function mondayOf(dateStr){
+  if(!dateStr)return null;
+  const [y,m,d]=dateStr.split('-').map(Number);
+  const dt=new Date(y,m-1,d);
+  const dow=dt.getDay();               // 0=Dom .. 6=Sab
+  const diff=(dow===0?-6:1-dow);       // llevar a lunes
+  dt.setDate(dt.getDate()+diff);
+  return dt;
+}
+function fmtFecha(dt){
+  return pad(dt.getDate())+'-'+pad(dt.getMonth()+1)+'-'+dt.getFullYear();
+}
+/* Fecha de la columna: un día menos que el día de la semana.
+   LUNES (i=0) considera el sábado anterior (2 días atrás). */
+function fechaColumna(monday,i){
+  if(!monday)return'';
+  const dt=new Date(monday);
+  dt.setDate(dt.getDate()+i-(i===0?2:1));
+  return fmtFecha(dt);
+}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function buildDayData(){
+  /* Por día: lista {hora, horaMin, ct, transporte, obs} ordenada por hora */
+  const days=DAY_COLS.map(()=>[]);
+  ikeaRows.forEach(r=>{
+    const ct=String(getKey(r,'CT DESTINO')||'').trim();
+    const transporte=String(getKey(r,'TRANSPORTE')||'').trim();
+    const obs=String(getKey(r,'OBS')||'').trim();
+    DAY_COLS.forEach((col,i)=>{
+      const txt=horaTexto(getKey(r,col));
+      if(!txt)return;
+      days[i].push({hora:txt,horaMin:horaInicioMin(txt),ct,transporte,obs});
+    });
+  });
+  days.forEach(list=>list.sort((a,b)=>a.horaMin-b.horaMin||a.ct.localeCompare(b.ct)));
+  /* CT VALPARAISO se repite 5 veces (CT VALPARAISO 1..5), mismo horario,
+     y el orden sigue correlativo al quedar contiguos tras el sort. */
+  return days.map(list=>{
+    const out=[];
+    list.forEach(x=>{
+      if(cleanStr(x.ct)==='CT VALPARAISO'){
+        for(let n=1;n<=5;n++) out.push({...x,ct:`CT VALPARAISO ${n}`});
+      }else{
+        out.push(x);
+      }
+    });
+    return out;
+  });
+}
+
+function render(){
+  const el=document.getElementById('results');
+  const btn=document.getElementById('btnCopy');
+  if(!ikeaRows||!ikeaRows.length){
+    el.innerHTML='<div class="empty-state card"><div class="empty-title">Carga el archivo de circuito</div><div>Sube el Excel y elige la fecha de inicio de semana para ver los CT Destino ordenados por hora, día por día.</div></div>';
+    btn.disabled=true; return;
+  }
+  const monday=mondayOf(document.getElementById('weekStart').value);
+  const days=buildDayData();
+  let html='';
+  days.forEach((list,i)=>{
+    let fecha='', fechaCol=fechaColumna(monday,i);
+    if(monday){ const dt=new Date(monday); dt.setDate(dt.getDate()+i); fecha=fmtFecha(dt); }
+    html+=`<div class="card day-card">
+      <div class="day-header">
+        <div style="display:flex;align-items:baseline;gap:10px">
+          <span class="day-name">${DAY_COLS[i]}</span>
+          ${fecha?`<span class="day-date">${fecha}</span>`:''}
+        </div>
+        <span class="day-count">${list.length} carga${list.length===1?'':'s'}</span>
+      </div>`;
+    if(!list.length){
+      html+='<div class="empty-day">Sin cargas IKEA este día</div>';
+    }else{
+      html+='<table><thead><tr><th>CT Destino</th><th style="width:140px">Horario</th><th style="width:70px">Orden</th><th style="width:110px">Fecha</th></tr></thead><tbody>';
+      list.forEach((x,idx)=>{
+        html+=`<tr><td class="ct">${esc(x.ct)}</td><td class="hora">${esc(x.hora)}</td><td style="font-family:var(--font-mono);font-weight:700;color:var(--textSub)">${idx+1}</td><td style="font-family:var(--font-mono);color:var(--textSub)">${esc(fechaCol)}</td></tr>`;
+      });
+      html+='</tbody></table>';
+    }
+    html+='</div>';
+  });
+  el.innerHTML=html;
+  btn.disabled=false;
+  buildOutlook(days,monday);
+}
+
+/* Tabla Outlook para copiar (Aptos, bordes) */
+function buildOutlook(days,monday){
+  const thS="border:1px solid black;font-weight:bold;font-family:Aptos,sans-serif;font-size:11pt;padding:4px 8px;text-align:center;color:black;background-color:#f2f2f2;";
+  const tdS="border:1px solid black;font-family:Aptos,sans-serif;font-size:10pt;padding:4px 8px;text-align:left;color:black;";
+  const tdC=tdS.replace('text-align:left','text-align:center');
+  let html='<table style="border-collapse:collapse;font-family:Aptos,sans-serif;">';
+  html+=`<thead><tr><th style="${thS}">CT Destino</th><th style="${thS}">Horario</th><th style="${thS}">Orden</th><th style="${thS}">Fecha</th></tr></thead><tbody>`;
+  days.forEach((list,i)=>{
+    const fecha=fechaColumna(monday,i);
+    if(!list.length)return;
+    list.forEach((x,idx)=>{
+      html+=`<tr><td style="${tdS}">${esc(x.ct)}</td><td style="${tdC}">${esc(x.hora)}</td><td style="${tdC}">${idx+1}</td><td style="${tdC}">${esc(fecha)}</td></tr>`;
+    });
+  });
+  html+='</tbody></table>';
+  document.getElementById('outlook-wrap').innerHTML=html;
+}
+
+function copyTable(){
+  const node=document.querySelector('#outlook-wrap table');
+  if(!node){ showToast('Sin tabla para copiar'); return; }
+  const range=document.createRange();
+  range.selectNode(node);
+  window.getSelection().removeAllRanges();
+  window.getSelection().addRange(range);
+  try{ document.execCommand('copy'); showToast('Tabla copiada correctamente'); }
+  catch(e){ showToast('Error al copiar'); }
+  window.getSelection().removeAllRanges();
+}
+
+document.getElementById('fileInput').addEventListener('change',handleFile);
+document.getElementById('weekStart').addEventListener('change',render);
+document.getElementById('btnCopy').addEventListener('click',copyTable);
+
+/* Default: lunes de la semana actual */
+(function(){
+  const now=new Date();
+  const dow=now.getDay();
+  now.setDate(now.getDate()+(dow===0?-6:1-dow));
+  document.getElementById('weekStart').value=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
+})();
+</script>
+</body>
+</html>
