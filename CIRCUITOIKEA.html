@@ -176,7 +176,7 @@ function mondayOf(dateStr){
   return dt;
 }
 function fmtFecha(dt){
-  return pad(dt.getDate())+'-'+pad(dt.getMonth()+1)+'-'+dt.getFullYear();
+  return dt.getFullYear()+'-'+pad(dt.getMonth()+1)+'-'+pad(dt.getDate());
 }
 /* Fecha de la columna: un día menos que el día de la semana.
    LUNES (i=0) considera el sábado anterior (2 días atrás). */
@@ -202,11 +202,26 @@ function buildDayData(){
     });
   });
   days.forEach(list=>list.sort((a,b)=>a.horaMin-b.horaMin||a.ct.localeCompare(b.ct)));
-  /* CT VALPARAISO se repite 5 veces (CT VALPARAISO 1..5), mismo horario,
-     y el orden sigue correlativo al quedar contiguos tras el sort. */
+  /* 1) CT DESTINO con "-" se separa en 2 filas: antes y después del guión
+        (la segunda con "CT " al inicio si no lo trae), misma hora.
+     2) CT VALPARAISO se repite 5 veces (CT VALPARAISO 1..5), mismo horario.
+     Al quedar contiguas tras el sort, el orden sigue correlativo. */
   return days.map(list=>{
-    const out=[];
+    const split=[];
     list.forEach(x=>{
+      const idx=x.ct.indexOf('-');
+      if(idx>-1){
+        const antes=x.ct.slice(0,idx).trim();
+        let despues=x.ct.slice(idx+1).trim();
+        if(despues&&!cleanStr(despues).startsWith('CT')) despues='CT '+despues;
+        if(antes) split.push({...x,ct:antes});
+        if(despues) split.push({...x,ct:despues});
+      }else{
+        split.push(x);
+      }
+    });
+    const out=[];
+    split.forEach(x=>{
       if(cleanStr(x.ct)==='CT VALPARAISO'){
         for(let n=1;n<=5;n++) out.push({...x,ct:`CT VALPARAISO ${n}`});
       }else{
