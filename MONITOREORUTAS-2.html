@@ -1245,7 +1245,23 @@ function renderIsosXCamion(){
   const ixcReal=rmVehs.length?fmtCL(isosReal/rmVehs.length):'0,00';
   const ixMini=miniVehs.length?fmtCL(isosMini/miniVehs.length):'0,00';
   const ixCam=camVehs.length?fmtCL(isosCam/camVehs.length):'0,00';
-  const fecha=new Date().toLocaleDateString();
+  // Fecha desde el archivo de Planificación SimpliRoute (primer ETA con fecha)
+  let planDate=null;
+  if(plan&&plan.stops&&plan.stops.length){
+    for(const s of plan.stops){
+      const m=String(s.eta||'').match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+      if(m){ planDate=new Date(+m[3],+m[2]-1,+m[1]); break; }
+    }
+  }
+  const baseDate=planDate||new Date();
+  const fecha=String(baseDate.getDate()).padStart(2,'0')+'-'+String(baseDate.getMonth()+1).padStart(2,'0')+'-'+baseDate.getFullYear();
+  // Semana ISO (AAAASS)
+  const _dt=new Date(Date.UTC(baseDate.getFullYear(),baseDate.getMonth(),baseDate.getDate()));
+  const _day=_dt.getUTCDay()||7;
+  _dt.setUTCDate(_dt.getUTCDate()+4-_day);
+  const _yearStart=new Date(Date.UTC(_dt.getUTCFullYear(),0,1));
+  const anio=_dt.getUTCFullYear();
+  const week=String(anio)+String(Math.ceil((((_dt-_yearStart)/86400000)+1)/7)).padStart(2,'0');
 
   // Teórico: desde Planificación SimpliRoute — solo VEH y MINI (excluye VAUX, VPR y VPV)
   let vehTeo='-', isosTeo='-', ixcTeo='-';
@@ -1276,12 +1292,15 @@ function renderIsosXCamion(){
     <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px">
       <div style="overflow-x:auto">
         <table style="width:100%;font-size:11px;font-family:var(--font-mono);border-collapse:collapse">
-          <thead><tr style="background:var(--bgCardAlt)">${['Fecha','Vehiculos','ISOs real','IxC real','Veh teo.','ISOs teo.','IxC teo.','Mini','ISOs mini','IxMini','Camion','ISOs camion','IxCam'].map(th).join('')}</tr></thead>
+          <thead><tr style="background:var(--bgCardAlt)">${['Fecha','Vehiculos','ISOs real','IxC real','ISOs teo.','IxC teo.','Mini','ISOs mini','IxMini','Camion','ISOs camion','IxCam','AÑO','WEEK','Veh teo.','Veh adicionales'].map(th).join('')}</tr></thead>
           <tbody><tr style="text-align:center;font-weight:700">
             ${td(fecha)}${td(rmVehs.length)}${td(isosReal,'font-weight:900;color:#0ea5e9')}${td(ixcReal)}
-            ${td(vehTeo,'background:rgba(0,0,0,0.03)')}${td(isosTeo,'background:rgba(0,0,0,0.03);font-weight:900;color:#16a34a')}${td(ixcTeo,'background:rgba(0,0,0,0.03)')}
+            ${td(isosTeo,'background:rgba(0,0,0,0.03);font-weight:900;color:#16a34a')}${td(ixcTeo,'background:rgba(0,0,0,0.03)')}
             ${td(miniVehs.length,'color:#a855f7')}${td(isosMini)}${td(ixMini)}
             ${td(camVehs.length,'color:#f97316')}${td(isosCam)}${td(ixCam)}
+            ${td(anio)}${td(week,'font-family:var(--font-mono)')}
+            ${td(vehTeo,'background:rgba(0,0,0,0.03)')}
+            ${td(vehTeo==='-'?'-':rmVehs.length-vehTeo,'font-weight:900;color:'+(vehTeo!=='-'&&rmVehs.length-vehTeo>0?'#dc2626':'var(--text)'))}
           </tr></tbody>
         </table>
       </div>
@@ -1311,9 +1330,11 @@ function renderIsosXCamion(){
     </div>`;
 
   el.querySelector('#btnCopyIsosXCam').addEventListener('click',()=>{
+    const vehAdic=vehTeo==='-'?'':rmVehs.length-vehTeo;
     const row=[fecha,rmVehs.length,isosReal,ixcReal,
-      vehTeo==='-'?'':vehTeo, isosTeo==='-'?'':isosTeo, ixcTeo==='-'?'':ixcTeo,
-      miniVehs.length,isosMini,ixMini,camVehs.length,isosCam,ixCam];
+      isosTeo==='-'?'':isosTeo, ixcTeo==='-'?'':ixcTeo,
+      miniVehs.length,isosMini,ixMini,camVehs.length,isosCam,ixCam,
+      anio,week, vehTeo==='-'?'':vehTeo, vehAdic];
     navigator.clipboard.writeText(row.join('\t'))
       .then(()=>showToast('✓ Datos copiados (Info solamente)'))
       .catch(()=>showToast('Error al copiar','error'));
