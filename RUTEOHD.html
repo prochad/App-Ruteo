@@ -214,6 +214,7 @@ label.field-label{font-size:10px;font-weight:600;text-transform:uppercase;letter
 <button class="btn btn-secondary" id="btn-proyectos" disabled>Proyectos</button>
 <button class="btn btn-secondary" id="btn-postsales" disabled>Post Sales</button>
 <button class="btn btn-secondary" id="btn-mini"     disabled>Mini Tickets</button>
+<button class="btn btn-secondary" id="btn-mono"     disabled>Mono Tickets</button>
 <button class="btn btn-secondary" id="btn-regular"  disabled>Ticket Regular</button>
 </div>
 </div>
@@ -441,7 +442,7 @@ document.getElementById('inp-f1').addEventListener('change',async e=>{
  e.target.value='';
 });
 function updatePreruteoButtons(){
- ['btn-proyectos','btn-postsales','btn-mini','btn-regular'].forEach(id=>{
+ ['btn-proyectos','btn-postsales','btn-mini','btn-mono','btn-regular'].forEach(id=>{
    document.getElementById(id).disabled=!S.dataF1;
  });
  document.getElementById('btn-exp-preola').disabled=!S.dataF1;
@@ -475,32 +476,67 @@ function descargarTickets(tipoVisita,nombreBase){
  exportXlsx(f,`${nombreBase} ${getFechaE()}.xlsx`);
  addLog(`${nombreBase}: ${f.length} filas`,'ok');
 }
+/* Regla Mini (sin cambios): mini_ticket + comuna mini, excluyendo Proyectos/Post Sales */
+function esFilaMini(r){
+ if(r['TIPO_VISITA']==='PROJECT'||r['TIPO_VISITA']==='POST_SALES')return false;
+ if(r['MINI_TICKET']!=='mini_ticket')return false;
+ return esComunaMini(r['D_COUNTY']||r['CONDUCTOR']||'');
+}
+/* Columna de clasificación E1/E2/E3: por nombre conocido o auto-detección por valores */
+function getClasifCol(){
+ if(!S.dataF1||!S.dataF1.length)return null;
+ const byName=findCol(S.dataF1[0],['CLASIFICACION','CLASIFICACIÓN','CLASIF','CLASIFICACION_E','CLASIFICACION E','CATEGORIA','CATEGORÍA','TIPO_E','E']);
+ const esE=v=>/^E\d$/.test(String(v||'').trim().toUpperCase());
+ if(byName&&S.dataF1.some(r=>esE(r[byName])))return byName;
+ // auto: columna donde la mayoría de los valores no vacíos son E1/E2/E3…
+ let best=null,bestPct=0;
+ Object.keys(S.dataF1[0]).forEach(k=>{
+   let tot=0,hit=0;
+   S.dataF1.forEach(r=>{const v=String(r[k]??'').trim();if(v!==''){tot++;if(esE(v))hit++;}});
+   if(tot>0){const pct=hit/tot;if(pct>bestPct){bestPct=pct;best=k;}}
+ });
+ return bestPct>=0.5?best:null;
+}
+function clasifDe(r,col){return String(r[col]??'').trim().toUpperCase();}
 function descargarMini(){
  if(!S.dataF1)return;
- const f=S.dataF1.filter(r=>{
-   if(r['TIPO_VISITA']==='PROJECT'||r['TIPO_VISITA']==='POST_SALES')return false;
-   if(r['MINI_TICKET']!=='mini_ticket')return false;
-   return esComunaMini(r['D_COUNTY']||r['CONDUCTOR']||'');
- });
+ const f=S.dataF1.filter(esFilaMini);
  if(!f.length)return addLog('Sin Mini Tickets','warn');
  exportXlsx(f,`RUTEAR MINI TICKET ${getFechaE()}.xlsx`);
  addLog(`Mini Ticket: ${f.length}`,'ok');
 }
-function descargarRegular(){
+/* Mono: clasificación E1 que no son mini (excluye Proyectos/Post Sales) */
+function descargarMono(){
  if(!S.dataF1)return;
+ const col=getClasifCol();
+ if(!col)return addLog('No se encontró la columna de clasificación (E1/E2/E3) en el archivo','err');
  const f=S.dataF1.filter(r=>{
    if(r['TIPO_VISITA']==='PROJECT'||r['TIPO_VISITA']==='POST_SALES')return false;
-   if(r['MINI_TICKET']==='no_mini_ticket')return true;
-   if(r['MINI_TICKET']==='mini_ticket')return!esComunaMini(r['D_COUNTY']||r['CONDUCTOR']||'');
-   return false;
+   if(esFilaMini(r))return false;
+   return clasifDe(r,col)==='E1';
+ });
+ if(!f.length)return addLog('Sin Mono Tickets (E1 no mini)','warn');
+ exportXlsx(f,`RUTEAR MONO TICKET ${getFechaE()}.xlsx`);
+ addLog(`Mono Ticket (E1, col "${col}"): ${f.length}`,'ok');
+}
+/* Regular: el resto (no Proyectos/Post Sales, no mini, no E1) */
+function descargarRegular(){
+ if(!S.dataF1)return;
+ const col=getClasifCol();
+ const f=S.dataF1.filter(r=>{
+   if(r['TIPO_VISITA']==='PROJECT'||r['TIPO_VISITA']==='POST_SALES')return false;
+   if(esFilaMini(r))return false;
+   if(col&&clasifDe(r,col)==='E1')return false;   // E1 va en Mono
+   return true;
  });
  if(!f.length)return addLog('Sin Ticket Regular','warn');
  exportXlsx(f,`RUTEAR TICKET ${getFechaE()}.xlsx`);
- addLog(`Regular: ${f.length}`,'ok');
+ addLog(`Regular: ${f.length}${col?'':' (sin columna de clasificación: incluye todo lo no mini)'}`,'ok');
 }
 document.getElementById('btn-proyectos').addEventListener('click',()=>descargarTickets('PROJECT','RUTEAR PROYECTOS'));
 document.getElementById('btn-postsales').addEventListener('click',()=>descargarTickets('POST_SALES','RUTEAR POST SALES'));
 document.getElementById('btn-mini').addEventListener('click',descargarMini);
+document.getElementById('btn-mono').addEventListener('click',descargarMono);
 document.getElementById('btn-regular').addEventListener('click',descargarRegular);
 // ══════════════════════════════════════════════════════
 //  POLINOMIO
