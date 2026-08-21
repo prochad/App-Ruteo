@@ -234,6 +234,14 @@ label.field-label{font-size:10px;font-weight:600;text-transform:uppercase;letter
 </div>
 <input type="file" id="inp-simpli" accept=".xlsx,.xls,.csv" style="display:none"/>
 </label>
+<label class="upload-zone" for="inp-resumen">
+<span class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
+<div style="flex:1;min-width:0">
+<div style="font-size:12px;font-weight:700;word-break:break-all" id="resumen-name">Cargar resumen de rutas</div>
+<div style="font-size:10px;color:var(--textSub);margin-top:4px">Archivo: <span style="font-family:var(--font-mono);font-weight:700;font-size:9px">resumen_de_rutas_YYYY-MM-DD.xlsx</span> · la tabla del correo se genera desde este archivo, cruzada a VEH FINAL</div>
+</div>
+<input type="file" id="inp-resumen" accept=".xlsx,.xls,.csv" style="display:none"/>
+</label>
 <button class="btn btn-primary btn-full btn-pill" id="btn-polinomio" disabled>▶ Ejecutar Polinomio</button>
 <div class="metrics" id="metrics-box" style="display:none">
 <div class="metric"><div class="key">Vehículos</div><div class="val" id="m-total">0</div></div>
@@ -305,6 +313,8 @@ const S = {
  fileSimpli: null,
  sheetPlan: [],
  sheetResumen: [],
+ fileResumen: null,
+ vehicleMap: null,
  sheetPolinomio: [],
  metrics: null,
  processing: false,
@@ -317,17 +327,26 @@ const CONFIG={
  trucks_max:100,
  trucks_excluded:[29,30],
  extraurban_communes:["ALHUE","BUIN","CALERA DE TANGO","COLINA","CURACAVI","EL MONTE","ISLA DE MAIPO","LAMPA","LO BARNECHEA","MARIA PINTO","MELIPILLA","PADRE HURTADO","PAINE","PENAFLOR","PIRQUE","SAN JOSE DE MAIPO","SAN PEDRO","TALAGANTE","TILTIL"],
- mini_comunas:["ÑUÑOA","NUNOA","LAS CONDES","VITACURA","PROVIDENCIA","SANTIAGO","CONCHALÍ","ESTACIÓN CENTRAL","HUECHURABA","INDEPENDENCIA","LA CISTERNA","LA FLORIDA","LA REINA","LO ESPEJO","MACUL","MAIPÚ","PEÑALOLÉN","PUDAHUEL","QUILICURA","QUINTA NORMAL","RECOLETA","RENCA","SAN BERNARDO","SAN JOAQUÍN","SAN MIGUEL","CERRILLOS","CERRO NAVIA","CONCHALÍ","EL BOSQUE","LA GRANJA","LO PRADO","PEDRO AGUIRRE CERSA","RENCA","SAN RAMÓN"],
+ mini_comunas:["ÑUÑOA","NUNOA","LAS CONDES","VITACURA","PROVIDENCIA","SANTIAGO","CONCHALÍ","ESTACIÓN CENTRAL","HUECHURABA","INDEPENDENCIA","LA CISTERNA","LA FLORIDA","LA REINA","LO ESPEJO","MACUL","MAIPÚ","PEÑALOLÉN","PUDAHUEL","QUILICURA","QUINTA NORMAL","RECOLETA","RENCA","SAN BERNARDO","SAN JOAQUÍN","SAN MIGUEL","CERRILLOS","CERRO NAVIA","EL BOSQUE","LA GRANJA","LO PRADO","PEDRO AGUIRRE CERDA","PEDRO AGUIRRE CERSA","SAN RAMÓN"],
  weights:{distance_km:0.44,duration_hr:0.10,iso_count:0.20,q_comunas:0.01,volume_m3:0.25},
  zone_multiplier:{extraurbano:2.0,default:1.0}
 };
 function rebuildTrucksOrder(){
  const excl=new Set(CONFIG.trucks_excluded.map(n=>+n));
  CONFIG.trucks_order=Array.from({length:CONFIG.trucks_max},(_,i)=>i+1)
-   .filter(i=>!excl.has(i))
+   .filter(i=>!excl.has(i)&&!(i>=60&&i<=80))   // 60–80 reservados para MONO
    .map(i=>`VEH${String(i).padStart(2,'0')}`);
 }
 rebuildTrucksOrder();
+/* Vehículos MONO: los VEH60–VEH80 del plan SimpliRoute se entregan como
+   MONO01–MONO21 (VEH60→MONO01, VEH61→MONO02, …). Van fuera del ranking del
+   polinomio, por lo que no afectan la clasificación de los vehículos normales. */
+function renameMono(name){
+ const m=/^VEH(\d+)$/i.exec(String(name||'').trim());
+ if(m){const n=+m[1]; if(n>=60&&n<=80) return 'MONO'+String(n-59).padStart(2,'0');}
+ return name;
+}
+function esVehMono(name){return renameMono(name)!==String(name||'').trim();}
 let MINI_COMUNAS=new Set();
 function rebuildMiniComunas(){
  MINI_COMUNAS=new Set();
@@ -618,7 +637,8 @@ async function processFlujo2(){
      const zonas={"Urbano":0,"Extraurbano":0};
      rows.forEach(r=>zonas[r._zona]++);
      const pred=zonas["Extraurbano"]>0?"Extraurbano":"Urbano";
-     summaries.push({original_vehicle:veh,Zona:pred,distance_km:dist,duration_hr:durSec/3600,duration_formatted:fmtSecs(durSec),iso_count:realIso,q_comunas:comunas.size,volume_m3:cap,isRegularTruck:/^VEH\d+$/i.test(veh)});
+     const esMono=esVehMono(veh);
+     summaries.push({original_vehicle:veh,Zona:pred,distance_km:dist,duration_hr:durSec/3600,duration_formatted:fmtSecs(durSec),iso_count:realIso,q_comunas:comunas.size,volume_m3:cap,isMono:esMono,isRegularTruck:!esMono&&/^VEH\d+$/i.test(veh)});
    }
    const regularTrucks=summaries.filter(s=>s.isRegularTruck);
    const others=summaries.filter(s=>!s.isRegularTruck);
@@ -638,7 +658,10 @@ async function processFlujo2(){
      r.final_route_to=CONFIG.trucks_order[idx]||`VEH${String(idx+3).padStart(2,'0')}`;
      vehicleMap[r.original_vehicle]=r.final_route_to;
    });
-   others.forEach(s=>{s.final_route_to=s.original_vehicle;vehicleMap[s.original_vehicle]=s.final_route_to});
+   others.forEach(s=>{
+     s.final_route_to=s.isMono?renameMono(s.original_vehicle):s.original_vehicle;
+     vehicleMap[s.original_vehicle]=s.final_route_to;
+   });
    const ordered=[...regularTrucks,...others];
    const originalKeys=Object.keys(dataSimpli[0]);
    const planData=cleanSimpli.map(row=>{
@@ -651,15 +674,16 @@ async function processFlujo2(){
      o["_DOFI"]=row[sC.idRef]; o["_TITULO"]=row[sC.titulo];
      return o;
    });
-   const polyData=ordered.map(o=>({"VEH INICIAL":o.original_vehicle,"VEH FINAL":o.final_route_to,"Tipo":o.isRegularTruck?"Camión Regular":"Otro","Zona":o.Zona,"Paradas ISO":o.iso_count,"Distancia Total (km)":+o.distance_km.toFixed(2),"Volumen (m3)":+o.volume_m3.toFixed(2),"Tiempo en Ruta":o.duration_formatted,"Cant. Comunas":o.q_comunas,"Score Base":+o.score_base.toFixed(4),"Score Final":+o.score.toFixed(4)}));
+   const polyData=ordered.map(o=>({"VEH INICIAL":o.original_vehicle,"VEH FINAL":o.final_route_to,"Tipo":o.isRegularTruck?"Camión Regular":o.isMono?"Mono":"Otro","Zona":o.Zona,"Paradas ISO":o.iso_count,"Distancia Total (km)":+o.distance_km.toFixed(2),"Volumen (m3)":+o.volume_m3.toFixed(2),"Tiempo en Ruta":o.duration_formatted,"Cant. Comunas":o.q_comunas,"Score Base":+o.score_base.toFixed(4),"Score Final":+o.score.toFixed(4)}));
    const pv=document.getElementById('veh-proyectos').value||'VPR01';
    const pp=document.getElementById('veh-postventa').value||'VPV01';
-   const resData=ordered.map(o=>({"ANDEN":"","LADO":"","Vehículo":o.final_route_to,"Distancia":+o.distance_km.toFixed(2),"Tiempo en Ruta":o.duration_formatted,"ISO":o.iso_count,"Q COMUNAS":o.q_comunas,"M3":+o.volume_m3.toFixed(2),"Horario salida":"","Zona":o.Zona,"Tipo Vehículo":"","Tipo Ticket":o.final_route_to.toUpperCase().startsWith("MINI")?"MiniTicket":"Ticket Regular"}));
+   const resData=ordered.map(o=>({"ANDEN":"","LADO":"","Vehículo":o.final_route_to,"Distancia":+o.distance_km.toFixed(2),"Tiempo en Ruta":o.duration_formatted,"ISO":o.iso_count,"Q COMUNAS":o.q_comunas,"M3":+o.volume_m3.toFixed(2),"Horario salida":"","Zona":o.Zona,"Tipo Vehículo":"","Tipo Ticket":o.final_route_to.toUpperCase().startsWith("MINI")?"MiniTicket":o.final_route_to.toUpperCase().startsWith("MONO")?"MonoTicket":"Ticket Regular"}));
    const metricsVehs=ordered.filter(o=>o.original_vehicle.toUpperCase()!==pv.toUpperCase()&&o.original_vehicle.toUpperCase()!==pp.toUpperCase());
    const totalVeh=metricsVehs.length;
    const sumISO=metricsVehs.reduce((s,o)=>s+o.iso_count,0);
    const promISO=totalVeh>0?+(sumISO/totalVeh).toFixed(2):0;
    S.sheetPlan=planData; S.sheetPolinomio=polyData; S.sheetResumen=resData;
+   S.vehicleMap=vehicleMap;
    S.metrics={total:totalVeh,prom:promISO,sum:sumISO};
    document.getElementById('metrics-box').style.display='flex';
    document.getElementById('m-total').textContent=totalVeh;
@@ -669,6 +693,7 @@ async function processFlujo2(){
    buildEmailPreview();
    if(document.getElementById('tab-params').classList.contains('active')) renderParams();
    addLog(`¡Polinomio listo! ${totalVeh} vehículos, ${sumISO} ISOs`,'ok');
+   if(S.fileResumen) await procesarResumenRutas();
  }catch(e){addLog('Error: '+e.message,'err')}finally{
    S.processing=false;
    btn.textContent='▶ Ejecutar Polinomio';
@@ -719,6 +744,97 @@ function downloadPreola(){
  exportXlsx(d,`3. ROUTE TO PROYECT+ POST SALES picking ${getFechaP()} entregas ${getFechaE()}.xlsx`,true);
  addLog(`Preola exportada (${d.length} filas → VEH98/VEH99)`,'ok');
 }
+// ══════════════════════════════════════════════════════
+//  RESUMEN DE RUTAS (resumen_de_rutas_YYYY-MM-DD.xlsx)
+//  La columna "Vehículo" trae el VEH INICIAL; se cruza con el
+//  mapeo del polinomio para mostrar la tabla por VEH FINAL.
+// ══════════════════════════════════════════════════════
+document.getElementById('inp-resumen').addEventListener('change',e=>{
+ const f=e.target.files[0]; if(!f)return;
+ S.fileResumen=f;
+ document.getElementById('resumen-name').textContent=f.name;
+ e.target.value='';
+ if(S.vehicleMap){ procesarResumenRutas(); }
+ else addLog('Resumen de rutas cargado: se aplicará al ejecutar el Polinomio','info');
+});
+async function procesarResumenRutas(){
+ if(!S.fileResumen||!S.vehicleMap)return;
+ try{
+   const rows=await readFileXlsx(S.fileResumen);
+   if(!rows.length)throw new Error('El archivo no tiene filas');
+   const h=rows[0];
+   const cV=findCol(h,['Vehículo','Vehiculo','Vehicle','Ruta']);
+   if(!cV)throw new Error('No se encontró la columna Vehículo');
+   const cD=findCol(h,['Distancia total','Distancia planificada','Distancia estimada','Distancia','Distance','Km']);
+   const cT=findCol(h,['Tiempo en ruta','Tiempo total','Tiempo estimado','Duración','Duracion','Tiempo']);
+   const cI=findCol(h,['Cantidad de visitas','Visitas','Paradas','Entregas','N° de visitas','Nº de visitas','Numero de visitas','Número de visitas','ISO','ISOs']);
+   const cM=findCol(h,['Carga 2','Capacidad 2','Carga 2 utilizada','Volumen','M3','m3','Carga2']);
+   const cQ=findCol(h,['Cantidad de comunas','Q Comunas','Q COMUNAS','Comunas']);
+   const cH=findCol(h,['Hora de inicio','Hora inicio','Inicio','Horario salida','Hora salida','Hora de salida']);
+   // datos del polinomio por VEH INICIAL (zona / respaldo de campos ausentes)
+   const polyByIni={}; S.sheetPolinomio.forEach(r=>polyByIni[String(r['VEH INICIAL']).toUpperCase()]=r);
+   const orderIdx={};  S.sheetPolinomio.forEach((r,i)=>orderIdx[String(r['VEH FINAL']).toUpperCase()]=i);
+   // agrupar por VEH INICIAL, saltando filas TOTAL / TOTAL RESUMEN DE RUTAS
+   const hhmmToSec=t=>{const m=String(t||'').match(/(\d{1,2}):(\d{2})/);return m?(+m[1])*3600+(+m[2])*60:0;};
+   const secToHHMM=sec=>String(Math.floor(sec/3600)).padStart(2,'0')+':'+String(Math.floor((sec%3600)/60)).padStart(2,'0');
+   const agg=new Map();
+   rows.forEach(r=>{
+     const ini=String(r[cV]??'').trim();
+     if(!ini||/^TOTAL/i.test(ini))return;   // excluye filas TOTAL intermedias y final
+     const iniUp=ini.toUpperCase();
+     if(!agg.has(iniUp))agg.set(iniUp,{ini,dist:0,durSec:0,iso:0,com:0,m3:0,hora:'',rutas:0});
+     const a=agg.get(iniUp);
+     a.rutas++;
+     if(cD)a.dist+=parseNum(r[cD]);
+     if(cT)a.durSec+=hhmmToSec(r[cT]);
+     if(cI)a.iso+=parseNum(r[cI]);
+     if(cQ)a.com+=parseNum(r[cQ]);
+     if(cM)a.m3+=parseNum(r[cM]);
+     if(cH&&!a.hora)a.hora=String(r[cH]??'').trim();
+   });
+   if(!agg.size)throw new Error('Sin rutas válidas en el archivo');
+   const out=[];
+   agg.forEach((a,iniUp)=>{
+     const fin=S.vehicleMap[iniUp]||a.ini;
+     const finUp=String(fin).toUpperCase();
+     const p=polyByIni[iniUp];
+     out.push({
+       "ANDEN":"","LADO":"",
+       "Vehículo":fin,
+       "Distancia":cD?+a.dist.toFixed(2):(p?p["Distancia Total (km)"]:""),
+       "Tiempo en Ruta":cT?secToHHMM(a.durSec):(p?p["Tiempo en Ruta"]:""),
+       "ISO":cI?a.iso:(p?p["Paradas ISO"]:""),
+       "Q COMUNAS":cQ?a.com:(p?p["Cant. Comunas"]:""),
+       "M3":cM?+a.m3.toFixed(2):(p?p["Volumen (m3)"]:""),
+       "Horario salida":a.hora,
+       "Zona":p?p["Zona"]:"",
+       "Tipo Vehículo":"",
+       "Tipo Ticket":finUp.startsWith("MINI")?"MiniTicket":finUp.startsWith("MONO")?"MonoTicket":"Ticket Regular"
+     });
+   });
+   // mismo orden que entrega el polinomio; lo no mapeado va al final
+   out.sort((a,b)=>{
+     const ia=orderIdx[String(a["Vehículo"]).toUpperCase()],ib=orderIdx[String(b["Vehículo"]).toUpperCase()];
+     if(ia!==undefined&&ib!==undefined)return ia-ib;
+     if(ia!==undefined)return -1;
+     if(ib!==undefined)return 1;
+     return String(a["Vehículo"]).localeCompare(String(b["Vehículo"]));
+   });
+   S.sheetResumen=out;
+   // métricas coherentes con la nueva tabla (excluye vehículos especiales)
+   const EX=getSpecialVehicles();
+   const filas=out.filter(r=>!EX.has(String(r["Vehículo"]).toUpperCase()));
+   const sum=filas.reduce((a,r)=>a+(parseNum(r["ISO"])||0),0);
+   S.metrics={total:filas.length,prom:filas.length?+(sum/filas.length).toFixed(2):0,sum:sum};
+   document.getElementById('m-total').textContent=S.metrics.total;
+   document.getElementById('m-prom').textContent=S.metrics.prom;
+   document.getElementById('m-sum').textContent=S.metrics.sum;
+   const noMap=out.filter(r=>orderIdx[String(r["Vehículo"]).toUpperCase()]===undefined).length;
+   buildEmailPreview();
+   addLog(`Resumen de rutas aplicado: ${out.length} rutas por VEH FINAL${noMap?` (${noMap} sin cruce en polinomio)`:''}`,'ok');
+ }catch(err){addLog('Error en resumen de rutas: '+err.message,'err')}
+}
+
 // ══════════════════════════════════════════════════════
 //  EMAIL
 // ══════════════════════════════════════════════════════
