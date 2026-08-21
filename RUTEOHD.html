@@ -476,11 +476,20 @@ function descargarTickets(tipoVisita,nombreBase){
  exportXlsx(f,`${nombreBase} ${getFechaE()}.xlsx`);
  addLog(`${nombreBase}: ${f.length} filas`,'ok');
 }
-/* Regla Mini (sin cambios): mini_ticket + comuna mini, excluyendo Proyectos/Post Sales */
+/* ══ Resolución robusta de columnas del archivo base ══ */
+function colTipoVisita(){return findCol(S.dataF1[0],['TIPO_VISITA','TIPO VISITA','VISIT_TYPE','TIPOVISITA'])||'TIPO_VISITA';}
+function colMiniTicket(){return findCol(S.dataF1[0],['MINI_TICKET','MINI TICKET','MINITICKET','MINI'])||'MINI_TICKET';}
+function colCounty(){return findCol(S.dataF1[0],['D_COUNTY','D COUNTY','COUNTY','COMUNA'])||'D_COUNTY';}
+function normVal(v){return removeAccents(String(v??'').trim()).toUpperCase().replace(/\s+/g,'_');}
+function tipoVisitaDe(r){return normVal(r[colTipoVisita()]);}
+function esProyOPost(r){const t=tipoVisitaDe(r);return t==='PROJECT'||t==='POST_SALES';}
+/* Valor mini tolerante: "mini_ticket", "Mini Ticket", "MINI", etc. (no "no_mini_ticket") */
+function esValorMini(v){const n=normVal(v);return n!==''&&!n.startsWith('NO')&&n.includes('MINI');}
+/* Regla Mini (misma lógica): mini_ticket + comuna mini, excluyendo Proyectos/Post Sales */
 function esFilaMini(r){
- if(r['TIPO_VISITA']==='PROJECT'||r['TIPO_VISITA']==='POST_SALES')return false;
- if(r['MINI_TICKET']!=='mini_ticket')return false;
- return esComunaMini(r['D_COUNTY']||r['CONDUCTOR']||'');
+ if(esProyOPost(r))return false;
+ if(!esValorMini(r[colMiniTicket()]))return false;
+ return esComunaMini(r[colCounty()]||r['CONDUCTOR']||'');
 }
 /* Columna de clasificación E1/E2/E3: por nombre conocido o auto-detección por valores */
 function getClasifCol(){
@@ -501,7 +510,13 @@ function clasifDe(r,col){return String(r[col]??'').trim().toUpperCase();}
 function descargarMini(){
  if(!S.dataF1)return;
  const f=S.dataF1.filter(esFilaMini);
- if(!f.length)return addLog('Sin Mini Tickets','warn');
+ if(!f.length){
+   const cM=colMiniTicket(),cC=colCounty();
+   const nMini=S.dataF1.filter(r=>esValorMini(r[cM])).length;
+   const ejVal=[...new Set(S.dataF1.map(r=>String(r[cM]??'').trim()).filter(Boolean))].slice(0,4).join(', ');
+   addLog(`Sin Mini Tickets · col mini: "${cM}" (${nMini} filas con valor mini; valores: ${ejVal||'vacíos'}) · col comuna: "${cC}"`,'warn');
+   return;
+ }
  exportXlsx(f,`RUTEAR MINI TICKET ${getFechaE()}.xlsx`);
  addLog(`Mini Ticket: ${f.length}`,'ok');
 }
@@ -511,11 +526,12 @@ function descargarMono(){
  const col=getClasifCol();
  if(!col)return addLog('No se encontró la columna de clasificación (E1/E2/E3) en el archivo','err');
  const f=S.dataF1.filter(r=>{
-   if(r['TIPO_VISITA']==='PROJECT'||r['TIPO_VISITA']==='POST_SALES')return false;
+   if(esProyOPost(r))return false;
    if(esFilaMini(r))return false;
-   return clasifDe(r,col)==='E1';
+   if(clasifDe(r,col)!=='E1')return false;
+   return esComunaMini(r[colCounty()]||r['CONDUCTOR']||'');   // mismas comunas que Mini
  });
- if(!f.length)return addLog('Sin Mono Tickets (E1 no mini)','warn');
+ if(!f.length)return addLog('Sin Mono Tickets (E1 no mini, en comunas mini)','warn');
  exportXlsx(f,`RUTEAR MONO TICKET ${getFechaE()}.xlsx`);
  addLog(`Mono Ticket (E1, col "${col}"): ${f.length}`,'ok');
 }
@@ -524,9 +540,10 @@ function descargarRegular(){
  if(!S.dataF1)return;
  const col=getClasifCol();
  const f=S.dataF1.filter(r=>{
-   if(r['TIPO_VISITA']==='PROJECT'||r['TIPO_VISITA']==='POST_SALES')return false;
+   if(esProyOPost(r))return false;
    if(esFilaMini(r))return false;
-   if(col&&clasifDe(r,col)==='E1')return false;   // E1 va en Mono
+   // E1 en comuna mini va en Mono; E1 fuera de esas comunas queda en Regular
+   if(col&&clasifDe(r,col)==='E1'&&esComunaMini(r[colCounty()]||r['CONDUCTOR']||''))return false;
    return true;
  });
  if(!f.length)return addLog('Sin Ticket Regular','warn');
