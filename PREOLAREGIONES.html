@@ -247,11 +247,18 @@ let rows = [], colHeaders = [], results = null;
 let detectedFacilities = [];
 let expandedFacs = {};
 let params = loadParams();
+/* Facility 9634: los lineales se entregan SIN guión (VALPO-1 → VALPO1) */
+function fixLineales9634(p) {
+ if (p && p['9634'] && Array.isArray(p['9634'].lineales)) {
+   p['9634'].lineales = p['9634'].lineales.map(l => String(l).replace(/-+/g, ''));
+ }
+ return p;
+}
 function loadParams() {
- try { const c = localStorage.getItem('preola_params_v5'); return c ? JSON.parse(c) : clone(DEFAULT_PARAMS); }
+ try { const c = localStorage.getItem('preola_params_v5'); return fixLineales9634(c ? JSON.parse(c) : clone(DEFAULT_PARAMS)); }
  catch { return clone(DEFAULT_PARAMS); }
 }
-function saveParams() { localStorage.setItem('preola_params_v5', JSON.stringify(params)); }
+function saveParams() { fixLineales9634(params); localStorage.setItem('preola_params_v5', JSON.stringify(params)); }
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function defaultForFac(fac) {
  return DEFAULT_PARAMS[fac] ? clone(DEFAULT_PARAMS[fac]) : { maxPos:60, maxVol:6, lineales:[`${fac}1`,`${fac}2`] };
@@ -558,7 +565,8 @@ function handleBulkApply() {
    if (fac.toUpperCase() === 'FACILITY') return;
    if (isNaN(n) || n < 1) return;
    const cur = params[fac] || defaultForFac(fac);
-   const newL = []; for (let i=0;i<n;i++) newL.push(`${prefix}${i+1}`);
+   const cleanPrefix = fac === '9634' ? prefix.replace(/-+/g,'') : prefix;
+   const newL = []; for (let i=0;i<n;i++) newL.push(`${cleanPrefix}${i+1}`);
    params[fac] = { ...cur, lineales: newL };
    count++;
  });
