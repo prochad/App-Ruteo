@@ -585,18 +585,26 @@ function downloadPreola() {
    const asignado = results.assignmentMap[id];
    return { ...row, ROUTE_TO: asignado !== undefined ? asignado : (row.ROUTE_TO ?? '') };
  });
- const ws = XLSX.utils.json_to_sheet(updated, { header: colHeaders });
- const wb = XLSX.utils.book_new();
- XLSX.utils.book_append_sheet(wb, ws, 'Página1_1');
- XLSX.writeFile(wb, 'PREOLA_ASIGNADO.xlsx');
+ writeSplit(updated, 'PREOLA_ASIGNADO', 'Página1_1', data => XLSX.utils.json_to_sheet(data, { header: colHeaders }));
 }
 function downloadAsignacion() {
  if (!results) return;
  const aoa = Object.entries(results.assignmentMap).map(([id, lineal]) => [id, lineal]);
- const ws = XLSX.utils.aoa_to_sheet(aoa);
- const wb = XLSX.utils.book_new();
- XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
- XLSX.writeFile(wb, 'preola.xlsx');
+ writeSplit(aoa, 'preola', 'Sheet1', data => XLSX.utils.aoa_to_sheet(data));
+}
+/* Si hay más de 1000 filas, divide en 2 archivos: el 1º con 900 filas y el 2º con el resto */
+const SPLIT_LIMIT = 1000, SPLIT_FIRST = 900;
+function writeSplit(data, baseName, sheetName, toSheet) {
+ const save = (chunk, name) => {
+   const wb = XLSX.utils.book_new();
+   XLSX.utils.book_append_sheet(wb, toSheet(chunk), sheetName);
+   XLSX.writeFile(wb, name);
+ };
+ if (data.length <= SPLIT_LIMIT) { save(data, `${baseName}.xlsx`); return; }
+ save(data.slice(0, SPLIT_FIRST), `${baseName}_1.xlsx`);
+ // pequeña pausa para que el navegador no bloquee la segunda descarga
+ setTimeout(() => save(data.slice(SPLIT_FIRST), `${baseName}_2.xlsx`), 600);
+ alert(`El archivo tiene ${data.length} filas: se descargan 2 archivos (${SPLIT_FIRST} + ${data.length - SPLIT_FIRST}).`);
 }
 // ─── INIT ────────────────────────────────────────────────
 renderFacilityList();
