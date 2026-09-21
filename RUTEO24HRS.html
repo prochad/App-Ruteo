@@ -181,6 +181,7 @@
                 <button class="btn btn-secondary" onclick="exportPre('proyectos')"><i data-lucide="download" style="width:16px;"></i> Descargar Proyectos</button>
                 <button class="btn btn-secondary" onclick="exportPre('post_sales')"><i data-lucide="download" style="width:16px;"></i> Descargar Post Sales</button>
                 <button class="btn btn-secondary" onclick="exportPre('mini')"><i data-lucide="download" style="width:16px;"></i> Descargar Mini Ticket</button>
+                <button class="btn btn-secondary" onclick="exportPre('mono')"><i data-lucide="download" style="width:16px;"></i> Descargar Mono Ticket</button>
                 <button class="btn btn-secondary" onclick="exportPre('regular')"><i data-lucide="download" style="width:16px;"></i> Descargar Ticket Regular</button>
               </div>
             </div>
@@ -265,7 +266,8 @@
               <button class="btn btn-secondary" onclick="exportPre('proyectos')" id="btn-dl-pre-1" disabled><i data-lucide="file-spreadsheet" style="width:16px;"></i> Proyectos</button>
               <button class="btn btn-secondary" onclick="exportPre('post_sales')" id="btn-dl-pre-2" disabled><i data-lucide="file-spreadsheet" style="width:16px;"></i> Post Sales</button>
               <button class="btn btn-secondary" onclick="exportPre('mini')" id="btn-dl-pre-3" disabled><i data-lucide="file-spreadsheet" style="width:16px;"></i> Mini Ticket</button>
-              <button class="btn btn-secondary" onclick="exportPre('regular')" id="btn-dl-pre-4" disabled><i data-lucide="file-spreadsheet" style="width:16px;"></i> Ticket Regular</button>
+              <button class="btn btn-secondary" onclick="exportPre('mono')" id="btn-dl-pre-4" disabled><i data-lucide="file-spreadsheet" style="width:16px;"></i> Mono Ticket</button>
+              <button class="btn btn-secondary" onclick="exportPre('regular')" id="btn-dl-pre-5" disabled><i data-lucide="file-spreadsheet" style="width:16px;"></i> Ticket Regular</button>
             </div>
           </div>
 
@@ -288,7 +290,12 @@
 
   <script>
     // --- Configuration & Constants ---
-    const MINI_COMUNAS = new Set(["ÑUÑOA", "NUNOA", "LAS CONDES", "VITACURA", "PROVIDENCIA", "SANTIAGO"]);
+    const MINI_COMUNAS_LIST = ["ÑUÑOA","NUNOA","LAS CONDES","VITACURA","PROVIDENCIA","SANTIAGO","CONCHALÍ","ESTACIÓN CENTRAL","HUECHURABA","INDEPENDENCIA","LA CISTERNA","LA FLORIDA","LA REINA","LO ESPEJO","MACUL","MAIPÚ","PEÑALOLÉN","PUDAHUEL","QUILICURA","QUINTA NORMAL","RECOLETA","RENCA","SAN BERNARDO","SAN JOAQUÍN","SAN MIGUEL","CERRILLOS","CERRO NAVIA","EL BOSQUE","LA GRANJA","LO PRADO","PEDRO AGUIRRE CERDA","PEDRO AGUIRRE CERSA","SAN RAMÓN"];
+    const MINI_COMUNAS = new Set();
+    MINI_COMUNAS_LIST.forEach(c => {
+      MINI_COMUNAS.add(String(c).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().trim());
+      MINI_COMUNAS.add(c.toUpperCase().trim());
+    });
     const PS_VEHS = new Set(['VPV01', 'VPV02', 'VPV03', 'VPV04', 'VPV05']);
 
     // --- State ---
@@ -351,6 +358,42 @@
       return MINI_COMUNAS.has(clean) || MINI_COMUNAS.has((c || '').toUpperCase().trim());
     }
 
+    /* ══ Lógica portada de RUTEOHD ══ */
+    function normVal(v){ return removeAccents(String(v ?? '').trim()).replace(/\s+/g,'_'); }
+    function colTipoVisita(){ return findCol(state.dataF1[0]||{},['TIPO_VISITA','TIPO VISITA','VISIT_TYPE','TIPOVISITA'])||'TIPO_VISITA'; }
+    function colMiniTicket(){ return findCol(state.dataF1[0]||{},['MINI_TICKET','MINI TICKET','MINITICKET','MINI'])||'MINI_TICKET'; }
+    function colCounty(){ return findCol(state.dataF1[0]||{},['D_COUNTY','D COUNTY','COUNTY','COMUNA'])||'D_COUNTY'; }
+    function esProyOPost(r){ const t=normVal(r[colTipoVisita()]); return t==='PROJECT'||t==='POST_SALES'; }
+    function esValorMini(v){ const n=normVal(v); return n!==''&&!n.startsWith('NO')&&n.includes('MINI'); }
+    function comunaDe(r){ return r[colCounty()]||r['CONDUCTOR']||r['Conductor']||''; }
+    function esFilaMini(r){
+      if(esProyOPost(r)) return false;
+      if(!esValorMini(r[colMiniTicket()])) return false;
+      return esComunaMini(comunaDe(r));
+    }
+    /* Columna de clasificación E1/E2/E3: nombre conocido o auto-detección por valores */
+    function getClasifCol(){
+      if(!state.dataF1||!state.dataF1.length) return null;
+      const byName=findCol(state.dataF1[0],['CLASIFICACION','CLASIFICACIÓN','CLASIF','CLASIFICACION_E','CLASIFICACION E','CATEGORIA','CATEGORÍA','TIPO_E','E']);
+      const esE=v=>/^E\d$/.test(String(v||'').trim().toUpperCase());
+      if(byName&&state.dataF1.some(r=>esE(r[byName]))) return byName;
+      let best=null,bestPct=0;
+      Object.keys(state.dataF1[0]).forEach(k=>{
+        let tot=0,hit=0;
+        state.dataF1.forEach(r=>{const v=String(r[k]??'').trim();if(v!==''){tot++;if(esE(v))hit++;}});
+        if(tot>0){const pct=hit/tot;if(pct>bestPct){bestPct=pct;best=k;}}
+      });
+      return bestPct>=0.5?best:null;
+    }
+    function clasifDe(r,col){ return String(r[col]??'').trim().toUpperCase(); }
+    /* Vehículos MONO: VEH60–VEH80 del plan se entregan como MONO01–MONO21 */
+    function renameMono(name){
+      const m=/^VEH(\d+)$/i.exec(String(name||'').trim());
+      if(m){ const n=+m[1]; if(n>=60&&n<=80) return 'MONO'+String(n-59).padStart(2,'0'); }
+      return name;
+    }
+    function esVehMono(name){ return renameMono(name)!==String(name||'').trim(); }
+
     function getFechaMañana() {
       const f = new Date(); f.setDate(f.getDate() + 1);
       return `${String(f.getDate()).padStart(2, '0')}-${String(f.getMonth() + 1).padStart(2, '0')}-${f.getFullYear()}`;
@@ -411,7 +454,7 @@
             document.getElementById('prep-actions').classList.remove('hidden');
             
             // Enable pre-ruteo buttons
-            for(let i=1; i<=4; i++) {
+            for(let i=1; i<=5; i++) {
               const btn = document.getElementById('btn-dl-pre-'+i);
               if(btn) btn.disabled = false;
             }
@@ -489,7 +532,7 @@
           const t = (r[kTit] || '').trim().toUpperCase();
           if (!t || t === 'INICIO' || t === 'FIN') return;
           const vehIni = (r[kVehI] || '').trim().toUpperCase();
-          const vehFin = mapConv[vehIni] || vehIni;
+          const vehFin = esVehMono(vehIni) ? renameMono(vehIni) : (mapConv[vehIni] || vehIni);
           mapPlan[t] = { dofi: (r[kDofi] || '').trim(), vehIni, vehFin };
         });
 
@@ -553,24 +596,31 @@
       let name = '';
 
       if (type === 'proyectos') {
-        rows = state.dataF1.filter(r => r['TIPO_VISITA'] === 'PROJECT');
+        rows = state.dataF1.filter(r => normVal(r[colTipoVisita()]) === 'PROJECT');
         name = `RUTEAR PROYECTOS ${getFechaMañana()}.xlsx`;
       } else if (type === 'post_sales') {
-        rows = state.dataF1.filter(r => r['TIPO_VISITA'] === 'POST_SALES');
+        rows = state.dataF1.filter(r => normVal(r[colTipoVisita()]) === 'POST_SALES');
         name = `RUTEAR POST SALES ${getFechaMañana()}.xlsx`;
       } else if (type === 'mini') {
-        rows = state.dataF1.filter(r => {
-          if (r['TIPO_VISITA'] === 'PROJECT' || r['TIPO_VISITA'] === 'POST_SALES') return false;
-          if (r['MINI_TICKET'] !== 'mini_ticket') return false;
-          return esComunaMini(r['D_COUNTY'] || r['CONDUCTOR'] || r['Conductor'] || '');
-        });
+        rows = state.dataF1.filter(esFilaMini);
         name = `RUTEAR MINI TICKET ${getFechaMañana()}.xlsx`;
-      } else if (type === 'regular') {
+      } else if (type === 'mono') {
+        // E1, no mini, en comunas mini
+        const col = getClasifCol();
+        if (!col) { addLog('No se encontró la columna de clasificación (E1/E2/E3) en el archivo', 'err'); return; }
         rows = state.dataF1.filter(r => {
-          if (r['TIPO_VISITA'] === 'PROJECT' || r['TIPO_VISITA'] === 'POST_SALES') return false;
-          if (r['MINI_TICKET'] === 'no_mini_ticket') return true;
-          if (r['MINI_TICKET'] === 'mini_ticket') return !esComunaMini(r['D_COUNTY'] || r['CONDUCTOR'] || r['Conductor'] || '');
-          return false;
+          if (esProyOPost(r) || esFilaMini(r)) return false;
+          if (clasifDe(r, col) !== 'E1') return false;
+          return esComunaMini(comunaDe(r));
+        });
+        name = `RUTEAR MONO TICKET ${getFechaMañana()}.xlsx`;
+      } else if (type === 'regular') {
+        // Resto: no Proyectos/Post Sales, no Mini, no Mono
+        const col = getClasifCol();
+        rows = state.dataF1.filter(r => {
+          if (esProyOPost(r) || esFilaMini(r)) return false;
+          if (col && clasifDe(r, col) === 'E1' && esComunaMini(comunaDe(r))) return false;
+          return true;
         });
         name = `RUTEAR TICKET ${getFechaMañana()}.xlsx`;
       }
