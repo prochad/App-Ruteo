@@ -250,7 +250,7 @@ td.cq-sel{background:rgba(37,99,235,0.10)!important;outline:1px solid rgba(37,99
   <div class="toast"></div>
 <script>
 /* ═══════ STATE ═══════ */
-const SR_BASE = 'https://app.simpliroute.com';
+const SR_BASE = 'https://api.simpliroute.com';   // host de la API (app.simpliroute.com es la web, no la API)
 const SR_TOKEN_KEY = 'mr_sr_token';
 const PLAN_KEY = 'mr_plan_v1';
 
@@ -639,34 +639,57 @@ function parseCSVStandalone(rows) {
 
 /* ═══════ SR API ═══════ */
 const SR_PROXIES=[
-  u=>`https://corsproxy.io/?${encodeURIComponent(u)}`,
-  u=>`https://corsproxy.org/?${encodeURIComponent(u)}`,
+  u=>`https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+  u=>`https://thingproxy.freeboard.io/fetch/${u}`,
   u=>`https://proxy.cors.sh/${u}`,
 ];
+async function srFetch(url, token, ms){
+  const authHdr={'Authorization':`Token ${token}`,'Accept':'application/json'};
+  const ctrl=new AbortController();
+  const tid=setTimeout(()=>ctrl.abort(),ms||15000);
+  try{ return await fetch(url,{headers:authHdr,signal:ctrl.signal}); }
+  finally{ clearTimeout(tid); }
+}
+/* Verifica el token contra /v1/accounts/me/ para separar "token malo" de "bloqueo de red" */
+async function srTestToken(token){
+  try{
+    const r=await srFetch(`${SR_BASE}/v1/accounts/me/`,token,10000);
+    if(r.status===401||r.status===403)return{ok:false,motivo:'token'};
+    if(r.ok)return{ok:true};
+    return{ok:false,motivo:`HTTP ${r.status}`};
+  }catch(e){ return{ok:false,motivo:e.name==='AbortError'?'timeout':'red'}; }
+}
 async function fetchSrVisitas(token, date){
   if(!token)throw new Error('Sin token configurado');
   const url=`${SR_BASE}/v1/routes/visits/?planned_date=${date}`;
-  const authHdr={'Authorization':`Token ${token}`,'Accept':'application/json'};
-  const attempts=[
-    {url, headers:authHdr},
-    ...SR_PROXIES.map(fn=>({url:fn(url), headers:authHdr}))
-  ];
-  let lastErr='';
-  for(const a of attempts){
+  const attempts=[url, ...SR_PROXIES.map(fn=>fn(url))];
+  let lastErr='', bloqueado=false;
+  for(let i=0;i<attempts.length;i++){
     let resp;
     try{
-      const ctrl=new AbortController();
-      const tid=setTimeout(()=>ctrl.abort(),8000);
-      resp=await fetch(a.url,{headers:a.headers,signal:ctrl.signal});
-      clearTimeout(tid);
-    }catch(e){ lastErr=e.name==='AbortError'?'Timeout':'Sin respuesta'; continue; }
-    if(resp.status===401||resp.status===403)throw new Error('Token inválido o sin permisos en SimpliRoute');
+      resp=await srFetch(attempts[i],token);
+    }catch(e){
+      // fetch que lanza = CORS, DNS, offline o VPN/firewall corporativo
+      lastErr=e.name==='AbortError'?'Timeout (el servidor no respondió a tiempo)':'Conexión bloqueada (CORS, red corporativa o sin internet)';
+      if(i===0)bloqueado=true;
+      continue;
+    }
+    if(resp.status===401||resp.status===403)throw new Error('Token inválido o sin permisos en SimpliRoute. Genera uno nuevo en app2.simpliroute.com → Perfil → Información.');
+    if(resp.status===404){ lastErr='HTTP 404 (endpoint no encontrado)'; continue; }
     if(!resp.ok){ lastErr=`HTTP ${resp.status}`; continue; }
     let data;
     try{ data=await resp.json(); }catch{ lastErr='Respuesta no válida (no es JSON)'; continue; }
-    return Array.isArray(data)?data:(data.results||[]);
+    const arr=Array.isArray(data)?data:(data.results||[]);
+    if(i>0)showToast('Conectado vía proxy (la conexión directa está bloqueada)','warn');
+    return arr;
   }
-  throw new Error(`No se pudo conectar con SimpliRoute. Último error: ${lastErr||'desconocido'}. Verifica el token y tu conexión.`);
+  // diagnóstico final: ¿es el token o es la red?
+  if(bloqueado){
+    const t=await srTestToken(token);
+    if(!t.ok&&t.motivo==='token')throw new Error('Token inválido o sin permisos en SimpliRoute.');
+    throw new Error(`No se pudo conectar con SimpliRoute (${lastErr}). La app llama a ${SR_BASE}; si estás en la red de la empresa o con VPN, pide habilitar ese dominio, o abre la app desde el navegador sin bloqueadores.`);
+  }
+  throw new Error(`No se pudo conectar con SimpliRoute. Último error: ${lastErr||'desconocido'}.`);
 }
 function parseApiVisits(results){
   if(!results||!results.length)return{byIso:{},byVeh:{}};
@@ -734,6 +757,17 @@ function computeKPIs(p, rep){
       total:0,terminados:0,enruta:0,rebajadas:0,pendientes:0,sindato:0
     };
     v.total++; bump(v,st);
+    // Avance en ruta según SimpliRoute (checkouts del token)
+    const a=srData&&srData.byIso&&srData.byIso[cleanIso(s.iso)];
+    if(a){
+      v.srVistos=(v.srVistos||0)+1;
+      if(a.checkout){
+        v.srHechos=(v.srHechos||0)+1;
+        const dt=parseCheckoutDt(a.checkout);
+        if(dt&&(!v._srLast||dt>v._srLast))v._srLast=dt;
+        if(dt&&(!v._srFirst||dt<v._srFirst))v._srFirst=dt;
+      }
+    }
     if(r&&r.region&&!v.region)v.region=r.region;
     global.total++; bump(global,st);
   });
@@ -746,7 +780,18 @@ function computeKPIs(p, rep){
     v.hechos=v.terminados;
     v.avance=v.total?Math.round(v.terminados/v.total*100):0;
     v.iniciada=(v.terminados+v.enruta+v.rebajadas)>0;
+    // Métricas de avance en ruta (SimpliRoute)
+    v.srVistos=v.srVistos||0; v.srHechos=v.srHechos||0;
+    v.srAvance=v.total?Math.round(v.srHechos/v.total*100):0;
+    v.srActiva=v.srHechos>0;                                  // la ruta muestra avance en Simpli
+    v.srPendientes=Math.max(v.total-v.srHechos,0);
+    v.srPrimero=v._srFirst?fmtTime(v._srFirst):'';
+    v.srUltimo=v._srLast?fmtTime(v._srLast):'';
+    delete v._srFirst; delete v._srLast;
   });
+  global.srRutas=Object.values(vehicles).filter(v=>v.srActiva).length;
+  global.srHechos=Object.values(vehicles).reduce((a,v)=>a+v.srHechos,0);
+  global.srAvance=global.total?Math.round(global.srHechos/global.total*100):0;
   global.iniciadas=Object.values(vehicles).filter(v=>v.iniciada).length;
   global.avance=global.total?Math.round(global.terminados/global.total*100):0;
   return{vehicles,global};
@@ -870,7 +915,8 @@ function renderMapSidebar(){
     <span class="stat-chip"><span class="stat-chip-val">${g.total}</span><span class="stat-chip-lbl">Paradas</span></span>
     <span class="stat-chip"><span class="stat-chip-val green">${g.terminados}</span><span class="stat-chip-lbl">Hechas</span></span>
     <span class="stat-chip"><span class="stat-chip-val red">${g.rebajadas}</span><span class="stat-chip-lbl">Rebaj.</span></span>
-    <span class="stat-chip"><span class="stat-chip-val">${g.avance}%</span><span class="stat-chip-lbl">Avance</span></span></div>`;
+    <span class="stat-chip"><span class="stat-chip-val">${g.avance}%</span><span class="stat-chip-lbl">Avance</span></span>
+    ${g.srRutas?`<span class="stat-chip" style="border-color:rgba(37,99,235,0.35)"><span class="stat-chip-val" style="color:var(--blue)">${g.srAvance}%</span><span class="stat-chip-lbl">Avance SR · ${g.srRutas} rutas</span></span>`:''}</div>`;
   const vehs=Object.values(kpi.vehicles).sort((a,b)=>a.vehFinal.localeCompare(b.vehFinal));
   const sinIniciar = vehs.filter(v => !v.iniciada);
   const alertStrip = sinIniciar.length ? `<div style="padding:6px 10px;background:rgba(234,88,12,0.08);border-bottom:1px solid rgba(234,88,12,0.2);font-size:10px;color:var(--orange);font-weight:600">⚠ ${sinIniciar.length} veh. sin iniciar: ${sinIniciar.slice(0,3).map(v=>esc(dispName(v))).join(', ')}${sinIniciar.length>3?'…':''}</div>` : '';
@@ -890,6 +936,10 @@ function renderMapSidebar(){
         <div class="veh-row-top"><span class="text-xs">${v.terminados}/${v.total}${v.rebajadas>0?` · <span style="color:var(--red)">${v.rebajadas} reb.</span>`:''} · ${v.iniciada?'en curso':'sin iniciar'}</span>
           <span class="num text-sm">${v.avance}%</span></div>
         <div class="progress-bar"><div class="progress-bar-fill ${v.avance>=80?'green':''}" style="width:${v.avance}%"></div></div>
+        ${v.srActiva?`<div class="veh-row-top" style="margin-top:3px">
+          <span class="text-xs" style="color:var(--blue)">SR ${v.srHechos}/${v.total}${v.srUltimo?` · últ. ${esc(v.srUltimo)}`:''}</span>
+          <span class="num text-xs" style="color:var(--blue)">${v.srAvance}%</span></div>
+        <div class="progress-bar" style="margin-top:2px"><div class="progress-bar-fill" style="width:${v.srAvance}%;background:var(--blue)"></div></div>`:''}
       </button>
       <button class="veh-eye${isHid?' is-hidden':''}" data-veh="${esc(v.vehFinal)}" title="${isHid?'Mostrar en mapa':'Ocultar del mapa'}">${isHid?'⊘':'●'}</button>
     </div>`;
@@ -1173,6 +1223,8 @@ function renderISOsTab(){
         <span class="num" style="font-size:11px;min-width:110px">${esc(s.iso)}</span>
         <span class="text-xs" style="min-width:30px;color:var(--textFaint)">#${s.orden}</span>
         <span class="pill" style="background:${st.color}1A;color:${st.color};border-color:${st.color}40">${st.label}</span>
+        ${(()=>{const a=srData&&srData.byIso&&srData.byIso[cleanIso(s.iso)];const dt=a&&a.checkout?parseCheckoutDt(a.checkout):null;
+          return dt?`<span class="text-xs" style="color:var(--blue)">✓ ${esc(fmtTime(dt))}</span>`:'';})()}
         ${r?.motivoRaw?`<span class="text-xs">${esc(r.motivo3)}</span>`:''}
       </div>`;
     }).join('');
@@ -1181,6 +1233,7 @@ function renderISOsTab(){
         <span class="veh-name">${esc(veh)}</span>
         <span style="display:flex;gap:6px;align-items:center">
           <span class="text-xs">${v.terminados||0}/${v.total||0} · ${v.avance||0}%</span>
+          ${v.srActiva?`<span class="pill" style="background:rgba(37,99,235,0.10);color:var(--blue);border-color:rgba(37,99,235,0.30)">SR ${v.srAvance}%</span>`:''}
           ${v.rebajadas?`<span class="pill pill-red">${v.rebajadas} reb.</span>`:''}
           <span style="color:var(--textFaint);font-size:12px">${isOpen?'▲':'▼'}</span>
         </span>
@@ -1201,7 +1254,17 @@ function renderISOsTab(){
 }
 
 /* ═══════ ISOs x CAMIÓN (portado de REPORTERUTAS) ═══════ */
-const MINI_THRESHOLD = 45; // >45 ISOs = Mini · ≤45 = Camión
+const MINI_THRESHOLD = 45; // (referencial) umbral histórico por cantidad de ISOs
+/* Mini se determina por el nombre del vehículo en el plan inicial (MINI01, MINI02…),
+   no por la cantidad de órdenes que termine llevando. */
+function esVehMini(name){ return /MINI/.test(cleanStr(name)); }
+/* Los MONO (ex VEH60–VEH80) cuentan como vehículos teóricos, igual que VEH y MINI. */
+function esVehTeorico(name){
+  const u=cleanStr(name);
+  if(!u) return false;
+  if(getVehType(u)!=='Normal') return false;           // descarta VAUX, VPR, VPV
+  return u.includes('VEH')||u.includes('MINI')||u.includes('MONO');
+}
 function renderIsosXCamion(){
   const el=document.getElementById('isosXCamRoot'); if(!el)return;
   if(!hasData()){
@@ -1236,8 +1299,8 @@ function renderIsosXCamion(){
   }
 
   const isosOf=v=>v.total||0;
-  const miniVehs=rmVehs.filter(v=>isosOf(v)>MINI_THRESHOLD);
-  const camVehs=rmVehs.filter(v=>isosOf(v)<=MINI_THRESHOLD);
+  const miniVehs=rmVehs.filter(v=>esVehMini(v.vehFinal));
+  const camVehs=rmVehs.filter(v=>!esVehMini(v.vehFinal));
   const isosReal=rmVehs.reduce((a,v)=>a+isosOf(v),0);
   const isosMini=miniVehs.reduce((a,v)=>a+isosOf(v),0);
   const isosCam=camVehs.reduce((a,v)=>a+isosOf(v),0);
@@ -1266,16 +1329,10 @@ function renderIsosXCamion(){
   // Teórico: desde Planificación SimpliRoute — solo VEH y MINI (excluye VAUX, VPR y VPV)
   let vehTeo='-', isosTeo='-', ixcTeo='-';
   if(plan&&plan.stops&&plan.stops.length){
-    const isTeoVeh=name=>{
-      const u=cleanStr(name);
-      if(!u)return false;
-      if(getVehType(u)!=='Normal')return false;       // descarta VAUX, VPR, VPV
-      return u.includes('VEH')||u.includes('MINI');   // solo VEH y MINI
-    };
     const teoByVeh={};
     plan.stops.forEach(s=>{
       const v=s.vehFinal||s.vehInicial;
-      if(isTeoVeh(v)) teoByVeh[v]=(teoByVeh[v]||0)+1;
+      if(esVehTeorico(v)) teoByVeh[v]=(teoByVeh[v]||0)+1;   // VEH, MINI y MONO
     });
     const teoVehs=Object.keys(teoByVeh);
     const tIsos=teoVehs.reduce((a,v)=>a+teoByVeh[v],0);
@@ -1321,8 +1378,8 @@ function renderIsosXCamion(){
       </div>
       <div class="card" style="padding:24px;display:flex;flex-direction:column;justify-content:center">
         <div style="display:flex;flex-direction:column;gap:16px">
-          <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px"><span style="color:var(--textSub)">Criterio Mini:</span><span style="font-weight:700;text-decoration:underline;color:#a855f7">&gt; ${MINI_THRESHOLD} ISOs</span></div>
-          <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px"><span style="color:var(--textSub)">Criterio Camión:</span><span style="font-weight:700;text-decoration:underline;color:#f97316">≤ ${MINI_THRESHOLD} ISOs</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px"><span style="color:var(--textSub)">Criterio Mini:</span><span style="font-weight:700;text-decoration:underline;color:#a855f7">Nombre MINI en el plan</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px"><span style="color:var(--textSub)">Criterio Camión:</span><span style="font-weight:700;text-decoration:underline;color:#f97316">Resto de la flota RM</span></div>
           <div style="padding-top:16px;border-top:1px dashed rgba(0,0,0,0.1)"></div>
           <p style="font-size:10px;line-height:1.6;color:var(--textFaint);font-style:italic;text-align:center">"La eficiencia se mide en la capacidad de carga optimizada por tipología de vehículo."</p>
         </div>
@@ -2340,6 +2397,17 @@ test('computeKPIs patente dominante',()=>{
   const k=computeKPIs(p,r).vehicles['V1'];
   assertEq([k.total,k.terminados,k.rebajadas,k.pendientes,k.avance],[3,1,1,1,33]);
   assertEq(k.patente,'PP1');
+});
+test('computeKPIs avance SR desde checkouts',()=>{
+  const prev=srData;
+  srData={byIso:{A:{checkout:'2026-09-01T10:15:00'},B:{checkout:''},C:{checkout:'2026-09-01T11:40:00'}},byVeh:{}};
+  const p={stops:[{iso:'A',vehFinal:'V1'},{iso:'B',vehFinal:'V1'},{iso:'C',vehFinal:'V1'},{iso:'D',vehFinal:'V2'}]};
+  const k=computeKPIs(p,null);
+  const v1=k.vehicles['V1'], v2=k.vehicles['V2'];
+  assertEq([v1.srHechos,v1.srAvance,v1.srActiva],[2,67,true]);
+  assertEq([v2.srHechos,v2.srActiva],[0,false]);
+  assertEq(k.global.srRutas,1);
+  srData=prev;
 });
 
 /* ═══════ BOOT ═══════ */
