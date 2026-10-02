@@ -835,10 +835,13 @@ const LEAFLET_CDNS=[
   {js:'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js',  css:'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css'},
   {js:'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js', css:'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css'}
 ];
+/* Sin CartoCDN: desde 2025 exige API key y devuelve los tiles con marca de agua.
+   Estas fuentes son abiertas y no requieren key. */
 const TILE_SOURCES=[
-  {url:'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', opts:{attribution:'© OpenStreetMap, © CARTO',subdomains:'abcd',maxZoom:19}},
-  {url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',                  opts:{attribution:'© OpenStreetMap',maxZoom:19}},
-  {url:'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',                opts:{attribution:'© OpenStreetMap',subdomains:'abc',maxZoom:17}}
+  {url:'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+   opts:{attribution:'© Esri, © OpenStreetMap',maxZoom:16}},
+  {url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',       opts:{attribution:'© OpenStreetMap',maxZoom:19}},
+  {url:'https://{s}.tile.openstreetmap.de/{z}/{x}/{y}.png',    opts:{attribution:'© OpenStreetMap',subdomains:'abc',maxZoom:18}}
 ];
 let _leafletPromise=null;
 function ensureLeaflet(){
@@ -876,6 +879,7 @@ function addTiles(map,idx){
   if(idx>=TILE_SOURCES.length)return;
   const src=TILE_SOURCES[idx];
   const layer=L.tileLayer(src.url,src.opts).addTo(map);
+  map._tileIdx=idx; map._tileLayer=layer;
   let errs=0;
   layer.on('tileerror',()=>{
     if(++errs>6&&idx+1<TILE_SOURCES.length){
@@ -886,6 +890,14 @@ function addTiles(map,idx){
   });
   return layer;
 }
+/* Cambio manual de fondo (botón en el mapa) por si una fuente queda lenta o bloqueada */
+function cycleTiles(){
+  const m=window._map; if(!m||!window.L)return;
+  const next=((m._tileIdx||0)+1)%TILE_SOURCES.length;
+  if(m._tileLayer)m.removeLayer(m._tileLayer);
+  addTiles(m,next);
+  showToast(`Fondo del mapa ${next+1}/${TILE_SOURCES.length}`,'ok');
+}
 function initMap(){
   if(window._map)return true;
   if(!window.L)return false;
@@ -894,6 +906,15 @@ function initMap(){
   addTiles(window._map);
   window._layerStops = L.layerGroup().addTo(window._map);
   window._layerLines=L.layerGroup().addTo(window._map);
+  const Btn=L.Control.extend({options:{position:'topright'},
+    onAdd:function(){
+      const b=L.DomUtil.create('button');
+      b.innerHTML='🗺'; b.title='Cambiar fondo del mapa';
+      b.style.cssText='width:30px;height:30px;border-radius:6px;border:1px solid rgba(0,0,0,.2);background:#fff;cursor:pointer;font-size:14px;line-height:1';
+      L.DomEvent.on(b,'click',e=>{L.DomEvent.stop(e);cycleTiles();});
+      return b;
+    }});
+  window._map.addControl(new Btn());
   setTimeout(()=>{try{window._map.invalidateSize()}catch{}} ,150);
   return true;
 }
