@@ -830,18 +830,80 @@ function visibleStops(){
 }
 
 /* ═══════ MAPA ═══════ */
+/* Leaflet y los tiles se sirven desde CDN: si la red bloquea uno, se prueba el siguiente */
+const LEAFLET_CDNS=[
+  {js:'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js',  css:'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css'},
+  {js:'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js', css:'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css'}
+];
+const TILE_SOURCES=[
+  {url:'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', opts:{attribution:'© OpenStreetMap, © CARTO',subdomains:'abcd',maxZoom:19}},
+  {url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',                  opts:{attribution:'© OpenStreetMap',maxZoom:19}},
+  {url:'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',                opts:{attribution:'© OpenStreetMap',subdomains:'abc',maxZoom:17}}
+];
+let _leafletPromise=null;
+function ensureLeaflet(){
+  if(window.L)return Promise.resolve(true);
+  if(_leafletPromise)return _leafletPromise;
+  _leafletPromise=new Promise(resolve=>{
+    let i=0;
+    const next=()=>{
+      if(window.L)return resolve(true);
+      if(i>=LEAFLET_CDNS.length)return resolve(false);
+      const c=LEAFLET_CDNS[i++];
+      const css=document.createElement('link'); css.rel='stylesheet'; css.href=c.css; document.head.appendChild(css);
+      const sc=document.createElement('script'); sc.src=c.js;
+      sc.onload=()=>resolve(!!window.L);
+      sc.onerror=next;
+      document.head.appendChild(sc);
+    };
+    next();
+  });
+  return _leafletPromise;
+}
+function mapError(elId){
+  const el=document.getElementById(elId); if(!el)return;
+  el.innerHTML=`<div class="empty-state" style="padding:28px">
+    <div class="empty-title">No se pudo cargar el mapa</div>
+    <div class="empty-body">La librería del mapa se descarga desde internet y la red la está bloqueando.
+    Pide habilitar <b>cdn.jsdelivr.net</b> y <b>tile.openstreetmap.org</b>, o abre la app fuera de la VPN.
+    El resto de las pestañas funciona normal.</div>
+    <button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="_leafletPromise=null;renderMap()">Reintentar</button>
+  </div>`;
+}
+/* Agrega tiles y cambia de proveedor si fallan demasiados */
+function addTiles(map,idx){
+  idx=idx||0;
+  if(idx>=TILE_SOURCES.length)return;
+  const src=TILE_SOURCES[idx];
+  const layer=L.tileLayer(src.url,src.opts).addTo(map);
+  let errs=0;
+  layer.on('tileerror',()=>{
+    if(++errs>6&&idx+1<TILE_SOURCES.length){
+      layer.off('tileerror'); map.removeLayer(layer);
+      addTiles(map,idx+1);
+      showToast('Mapa: usando servidor de tiles alternativo','warn');
+    }
+  });
+  return layer;
+}
 function initMap(){
-  if(window._map)return;
+  if(window._map)return true;
+  if(!window.L)return false;
   window._canvas=L.canvas({padding:0.5});
   window._map=L.map('leafmap',{preferCanvas:true,renderer:window._canvas}).setView([-33.45,-70.66],11);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
-    attribution:'© OpenStreetMap, © CARTO',subdomains:'abcd',maxZoom:19}).addTo(window._map);
+  addTiles(window._map);
   window._layerStops = L.layerGroup().addTo(window._map);
   window._layerLines=L.layerGroup().addTo(window._map);
+  setTimeout(()=>{try{window._map.invalidateSize()}catch{}} ,150);
+  return true;
 }
 function renderMap(){
   if(!plan)return;
-  initMap();
+  if(!window.L){
+    ensureLeaflet().then(ok=>{ if(ok)renderMap(); else mapError('leafmap'); });
+    return;
+  }
+  if(!initMap()){ mapError('leafmap'); return; }
   window._layerStops.clearLayers(); window._layerLines.clearLayers();
   const kpi=computeKPIs(plan,report);
   const stopsVis=visibleStops();
@@ -2262,10 +2324,9 @@ function openMiniMap(patente) {
     setTimeout(() => {
       const mapEl = document.getElementById('miniMapLeaf');
       if (!mapEl) return;
+      if (!window.L) { mapError('miniMapLeaf'); ensureLeaflet(); return; }
       const mm = L.map(mapEl, {zoomControl:true}).setView([-33.45,-70.66], 11);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        attribution:'© OpenStreetMap, © CARTO', subdomains:'abcd', maxZoom:19
-      }).addTo(mm);
+      addTiles(mm);
       const pts = stops.map(s => [s.lat, s.lng]);
       if (pts.length > 1) L.polyline(pts, {color:'#18181B', weight:2, opacity:0.35}).addTo(mm);
       stops.forEach(s => {
