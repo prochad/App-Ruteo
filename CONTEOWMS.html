@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Conteo WMS</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#F7F7F8; --bgCard:#FFFFFF; --bgCardAlt:#F4F4F5; --bgHover:rgba(0,0,0,0.03);
+  --border:#E4E4E7; --borderSoft:#EEEEEF; --borderFocus:#2563EB;
+  --text:#18181B; --textSub:#52525B; --textFaint:#A1A1AA;
+  --blue:#2563EB; --green:#16A34A; --orange:#EA580C; --red:#DC2626; --purple:#7C3AED;
+  --pasteBlue:rgba(37,99,235,0.08); --pasteGreen:rgba(22,163,74,0.10);
+  --pasteOrange:rgba(234,88,12,0.10); --pastePurple:rgba(124,58,237,0.10);
+  --font-mono:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;
+  --r-sm:6px; --r-md:10px;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif;font-size:13px;min-height:100vh;}
+header{background:var(--bgCard);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:20;}
+.app-icon{width:26px;height:26px;border-radius:7px;background:var(--blue);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.app-title{font-weight:800;font-size:13px;letter-spacing:0.02em;}
+.app-sub{font-size:10px;color:var(--textFaint);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:2px;}
+main{max-width:1060px;margin:0 auto;padding:24px;display:flex;flex-direction:column;gap:18px;}
+.card{background:var(--bgCard);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:0 1px 2px rgba(0,0,0,0.03);}
+.controls{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start;padding:18px 20px;}
+.field{display:flex;flex-direction:column;gap:6px;}
+.field-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--textFaint);}
+.drop-zone{display:flex;align-items:center;gap:10px;border:1.5px dashed var(--border);border-radius:var(--r-sm);padding:9px 16px;cursor:pointer;transition:border-color .15s,background .15s;background:var(--bgCardAlt);}
+.drop-zone:hover{border-color:var(--borderFocus);background:var(--pasteBlue);}
+.drop-zone input{display:none;}
+.drop-zone .file-name{font-family:var(--font-mono);font-size:11px;color:var(--textSub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;}
+.btn{border:none;border-radius:var(--r-sm);padding:9px 18px;font-size:11px;font-weight:700;cursor:pointer;transition:opacity .15s;font-family:inherit;}
+.btn:disabled{opacity:0.4;cursor:not-allowed;}
+.btn-primary{background:var(--blue);color:#fff;}
+.btn-primary:hover:not(:disabled){opacity:0.88;}
+.btn-secondary{background:var(--bgCardAlt);color:var(--text);border:1px solid var(--border);}
+.btn-secondary:hover:not(:disabled){background:var(--bgHover);}
+.pill{font-family:var(--font-mono);font-size:10px;border-radius:999px;padding:4px 12px;border:1px solid var(--borderSoft);background:var(--bgCardAlt);color:var(--textSub);}
+/* KPIs */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;}
+.kpi{padding:18px 20px;}
+.kpi-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--textFaint);margin-bottom:8px;}
+.kpi-val{font-size:34px;font-weight:800;font-family:var(--font-mono);letter-spacing:-0.02em;line-height:1;}
+.kpi-sub{font-size:11px;color:var(--textSub);margin-top:6px;}
+/* Tarjetas IPO / IPA */
+.grupos{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;}
+.grupo{padding:24px 26px;}
+.grupo-hdr{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--borderSoft);}
+.grupo-sigla{font-size:26px;font-weight:800;letter-spacing:-0.02em;line-height:1;}
+.grupo-ruta{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:var(--textFaint);}
+.grupo-cifras{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+/* Tablas */
+table{width:100%;border-collapse:collapse;font-size:12px;}
+th{padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--textFaint);font-weight:700;background:var(--bgCardAlt);border-bottom:1px solid var(--borderSoft);position:sticky;top:0;}
+td{padding:7px 14px;border-bottom:1px solid var(--borderSoft);}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:var(--bgHover);}
+.num{font-family:var(--font-mono);text-align:right;}
+.mono{font-family:var(--font-mono);}
+.section-hdr{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--borderSoft);}
+.section-hdr h2{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--textSub);}
+.empty-state{text-align:center;padding:60px 20px;color:var(--textFaint);}
+.empty-title{font-weight:700;font-size:14px;color:var(--textSub);margin-bottom:6px;}
+.hint{font-size:11px;color:var(--textFaint);padding:0 20px 16px;line-height:1.6;}
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--text);color:#fff;padding:10px 20px;border-radius:var(--r-sm);font-size:12px;font-weight:600;opacity:0;transition:all .25s;z-index:100;pointer-events:none;}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+#outlook-wrap{position:absolute;left:-9999px;top:0;}
+</style>
+</head>
+<body>
+<header>
+  <div class="app-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
+  <div>
+    <div class="app-title">CONTEO WMS</div>
+    <div class="app-sub">IPO 636 · IPA Tienda_594 · sin Cancelled</div>
+  </div>
+</header>
+
+<main>
+  <div class="card controls">
+    <div class="field">
+      <span class="field-label">Archivo WMS (XLSX)</span>
+      <label class="drop-zone">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+        <span class="file-name" id="fileName">Seleccionar archivo</span>
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+      </label>
+    </div>
+    <div class="field" style="justify-content:flex-end;">
+      <span class="field-label">&nbsp;</span>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <button class="btn btn-secondary" id="btnCopy" disabled>Copiar Resumen</button>
+        <button class="btn btn-secondary" id="btnExport" disabled>Exportar XLSX</button>
+        <span class="pill" id="summary">Sin datos</span>
+      </div>
+    </div>
+  </div>
+  <p class="hint">
+    <b>IPO</b> = ROUTE 636 · <b>IPA</b> = ROUTE Tienda_594 · se excluyen las líneas con <b>DOLINE_STATUS</b> Cancelled.<br>
+    <b>ISOs</b> cuenta los valores de ISO sin repetir; <b>LPNs</b> cuenta las filas (líneas DO_LINE) de cada ruta.
+  </p>
+
+  <div id="results">
+    <div class="empty-state card">
+      <div class="empty-title">Carga el archivo del WMS</div>
+      <div>Sube el Excel de DOs de Customer Order para ver el conteo de ISO y DO_LINE.</div>
+    </div>
+  </div>
+</main>
+
+<div id="outlook-wrap"></div>
+<div id="toast"></div>
+
+<script>
+/* ─── Parámetros del filtro ─── */
+const GRUPOS = [
+  { sigla:'IPO', ruta:'636',        rutaNorm:'636',        color:'var(--blue)'   },
+  { sigla:'IPA', ruta:'Tienda_594', rutaNorm:'TIENDA_594', color:'var(--purple)' }
+];
+const RUTAS = GRUPOS.map(g => g.rutaNorm);   // comparación normalizada
+const ESTADO_EXCLUIDO = 'CANCELLED';
+
+let filtradas = null;   // filas que pasan el filtro
+let resumen   = null;   // conteos por ruta + total
+
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), 2500);
+}
+function cleanStr(s){
+  return s ? String(s).normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().trim() : '';
+}
+/* Busca una columna tolerando mayúsculas, tildes, espacios y guiones bajos */
+function getKey(row, name){
+  if (row[name] !== undefined) return row[name];
+  const target = cleanStr(name).replace(/[\s_]/g,'');
+  const k = Object.keys(row).find(k => cleanStr(k).replace(/[\s_]/g,'') === target);
+  return k !== undefined ? row[k] : undefined;
+}
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function nf(n){ return n.toLocaleString('es-CL'); }
+
+function handleFile(e){
+  const file = e.target.files[0]; if(!file) return;
+  document.getElementById('fileName').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try{
+      const wb = XLSX.read(new Uint8Array(ev.target.result), {type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+      if(!rows.length){ showToast('El archivo no tiene filas'); return; }
+
+      // Verifica que existan las columnas que se necesitan
+      const faltan = ['ROUTE','DOLINE_STATUS','ISO','DO_LINE']
+        .filter(c => getKey(rows[0], c) === undefined);
+      if(faltan.length){
+        showToast('Faltan columnas: ' + faltan.join(', '));
+        document.getElementById('summary').textContent = 'Columnas faltantes';
+        return;
+      }
+
+      procesar(rows, file.name);
+    }catch(err){
+      console.error(err);
+      showToast('Error al leer el archivo');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  e.target.value = '';
+}
+
+function procesar(rows, nombreArchivo){
+  filtradas = rows.filter(r => {
+    const ruta = cleanStr(getKey(r,'ROUTE'));
+    if(!RUTAS.includes(ruta)) return false;
+    return cleanStr(getKey(r,'DOLINE_STATUS')) !== ESTADO_EXCLUIDO;
+  });
+
+  if(!filtradas.length){
+    document.getElementById('results').innerHTML =
+      '<div class="empty-state card"><div class="empty-title">Sin coincidencias</div>' +
+      '<div>Ninguna fila cumple ROUTE 636 / Tienda_594 con estado distinto de Cancelled.</div></div>';
+    document.getElementById('summary').textContent = `${rows.length} filas leídas · 0 filtradas`;
+    document.getElementById('btnCopy').disabled = true;
+    document.getElementById('btnExport').disabled = true;
+    return;
+  }
+
+  // Conteos por grupo: ISOs únicos y LPNs (= filas)
+  const grupos = GRUPOS.map(g => {
+    const filas = filtradas.filter(r => cleanStr(getKey(r,'ROUTE')) === g.rutaNorm);
+    const isos = new Set();
+    filas.forEach(r => {
+      const iso = String(getKey(r,'ISO') ?? '').trim();
+      if(iso) isos.add(iso);
+    });
+    return { ...g, isos: isos.size, lpns: filas.length };
+  });
+
+  const excluidasCancel = rows.filter(r =>
+    RUTAS.includes(cleanStr(getKey(r,'ROUTE'))) &&
+    cleanStr(getKey(r,'DOLINE_STATUS')) === ESTADO_EXCLUIDO).length;
+
+  resumen = {
+    archivo: nombreArchivo,
+    leidas: rows.length,
+    filtradas: filtradas.length,
+    excluidasCancel,
+    grupos
+  };
+
+  render();
+  showToast('✓ ' + resumen.grupos.map(g => `${g.sigla}: ${g.isos} ISOs / ${g.lpns} LPNs`).join(' · '));
+}
+
+function render(){
+  const r = resumen;
+  document.getElementById('summary').textContent =
+    `${nf(r.leidas)} filas leídas · ${nf(r.filtradas)} filtradas`;
+
+  const tarjetas = r.grupos.map(g => `
+    <div class="card grupo">
+      <div class="grupo-hdr">
+        <span class="grupo-sigla" style="color:${g.color}">${g.sigla}</span>
+        <span class="grupo-ruta">ROUTE ${esc(g.ruta)}</span>
+      </div>
+      <div class="grupo-cifras">
+        <div>
+          <div class="kpi-lbl">ISOs</div>
+          <div class="kpi-val" style="color:${g.color}">${nf(g.isos)}</div>
+        </div>
+        <div>
+          <div class="kpi-lbl">LPNs</div>
+          <div class="kpi-val">${nf(g.lpns)}</div>
+        </div>
+      </div>
+    </div>`).join('');
+
+  document.getElementById('results').innerHTML = `
+    <div class="grupos">${tarjetas}</div>`;
+
+  document.getElementById('btnCopy').disabled = false;
+  document.getElementById('btnExport').disabled = false;
+  buildOutlook();
+}
+
+/* Tabla para pegar en Outlook o Excel */
+function buildOutlook(){
+  const r = resumen;
+  const thS = "border:1px solid black;font-weight:bold;font-family:Aptos,sans-serif;font-size:11pt;padding:4px 8px;text-align:center;color:black;background-color:#cbd5e1;";
+  const tdS = "border:1px solid black;font-family:Aptos,sans-serif;font-size:10pt;padding:4px 8px;text-align:center;color:black;";
+  let html = '<table style="border-collapse:collapse;font-family:Aptos,sans-serif;">';
+  html += `<thead><tr><th style="${thS}"></th><th style="${thS}">ISOs</th><th style="${thS}">LPNs</th></tr></thead><tbody>`;
+  r.grupos.forEach(g => {
+    html += `<tr><td style="${tdS}text-align:left;font-weight:bold;">${esc(g.sigla)}</td><td style="${tdS}">${g.isos}</td><td style="${tdS}">${g.lpns}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('outlook-wrap').innerHTML = html;
+}
+
+function copyTable(){
+  const node = document.querySelector('#outlook-wrap table');
+  if(!node){ showToast('Sin tabla para copiar'); return; }
+  const range = document.createRange();
+  range.selectNode(node);
+  window.getSelection().removeAllRanges();
+  window.getSelection().addRange(range);
+  try{ document.execCommand('copy'); showToast('Resumen copiado'); }
+  catch(e){ showToast('Error al copiar'); }
+  window.getSelection().removeAllRanges();
+}
+
+/* Exporta el resumen y el detalle de las filas filtradas */
+function exportXlsx(){
+  if(!resumen || !filtradas) return;
+  const r = resumen;
+  const aoa = [['','ROUTE','ISOs','LPNs']];
+  r.grupos.forEach(g => aoa.push([g.sigla, g.ruta, g.isos, g.lpns]));
+  aoa.push([]);
+  aoa.push(['Filas leídas', r.leidas]);
+  aoa.push(['Cancelled excluidas', r.excluidasCancel]);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Resumen');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filtradas), 'Detalle');
+  XLSX.writeFile(wb, 'conteo_wms.xlsx');
+  showToast('Exportado');
+}
+
+document.getElementById('fileInput').addEventListener('change', handleFile);
+document.getElementById('btnCopy').addEventListener('click', copyTable);
+document.getElementById('btnExport').addEventListener('click', exportXlsx);
+</script>
+</body>
+</html>
