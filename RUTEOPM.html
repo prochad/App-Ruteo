@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+﻿﻿<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -2061,7 +2061,11 @@ function getRuteoPMHtml() {
   const intro = emailIntroP(params.emailRuteoPMIntro);
   const dataRepites = sortByDestino(rows.filter(r => String(r["CORREO REPITES"]||"").toUpperCase() === "SI"));
   let sRepites = "";
-  if (dataRepites.length) sRepites = emailSectionHeading(params.sectionTitleRepites || "Repites") + buildHTMLTable(["ISO","GESTIÓN","ORIGEN","DESTINO"], dataRepites, true);
+  if (dataRepites.length) {
+    // La sección Repites incluye COMENTARIO (viene de COMENTARIO_RAW en el dashboard)
+    const repitesConComentario = dataRepites.map(r => ({ ...r, COMENTARIO: r.COMENTARIO || r.COMENTARIO_RAW || "" }));
+    sRepites = emailSectionHeading(params.sectionTitleRepites || "Repites") + buildHTMLTable(["ISO","GESTIÓN","ORIGEN","DESTINO","COMENTARIO"], repitesConComentario, true);
+  }
   const dataPV = sortByDestino(rows.filter(r => isPV(r.DESTINO)));
   let sPV = "";
   if (dataPV.length) sPV = emailSectionHeading(params.sectionTitlePV || "Postventa") + buildHTMLTable(["ISO","GESTIÓN","ORIGEN","DESTINO"], dataPV, true);
