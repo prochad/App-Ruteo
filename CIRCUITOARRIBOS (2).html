@@ -173,7 +173,8 @@ tr:hover td{background:var(--bgHover);}
   <p class="hint">
     El facility de cada ISO (<b>D_FACILITY_ALIAS_ID</b>) se cruza con la tabla CT × Facility incorporada en la app.
     El <b>777 RM Salida directa</b> queda fuera. La fecha de arribo es la del viaje que sale en la fecha indicada
-    (por defecto, el día siguiente al actual). El listado se ordena por holgura de menor a mayor: las más críticas (holgura negativa) quedan arriba.
+    (por defecto, el día siguiente al actual). <b>CT Valparaíso</b> sale el mismo día del picking, así que su arribo se calcula desde esa fecha.
+    El listado se ordena por holgura de menor a mayor: las más críticas (holgura negativa) quedan arriba.
   </p>
   <div id="resultsCruce">
     <div class="empty-state card">
@@ -204,7 +205,7 @@ function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').rep
 function pad(n){ return String(n).padStart(2,'0'); }
 
 /* El Excel trae horas como texto ("18:00 a 20:00") o como hora real de Excel.
-   El espacio duro ( ) se usa como celda vacía en estos archivos. */
+   El espacio duro ( ) se usa como celda vacía en estos archivos. */
 function celdaTexto(v){
   if(v === null || v === undefined) return '';
   if(v instanceof Date) return pad(v.getHours()) + ':' + pad(v.getMinutes());
@@ -212,7 +213,7 @@ function celdaTexto(v){
     const min = Math.round(v * 24 * 60);
     return pad(Math.floor(min/60) % 24) + ':' + pad(min % 60);
   }
-  return String(v).replace(/ /g,' ').trim();
+  return String(v).replace(/ /g,' ').trim();
 }
 /* Minutos de la primera hora del texto, para ordenar y encadenar */
 function minutos(txt){
@@ -605,26 +606,46 @@ function handlePlanFile(e){
 
 /* Fecha de arribo por CT para el viaje que sale en la fecha indicada.
    Si ese CT no carga ese día, se toma la siguiente salida disponible. */
-function arribosPorCT(fechaSalida){
-  const monday = mondayOf(document.getElementById('weekStart').value);
-  const mapa = new Map();
-  if(!pares || !monday || !fechaSalida) return mapa;
+/* CT cuya salida ocurre el mismo día del picking: la ISO se pickea y sale ese día,
+   no al día siguiente como el resto de la red. */
+const CT_SALE_CON_PICKING = ['VALPARAISO'];
+function saleConPicking(ctNombre){
+  return CT_SALE_CON_PICKING.includes(normCT(ctNombre));
+}
 
+/* Índice de cargas IKEA por CT con su fecha de carga y de arribo, según la semana elegida */
+function indiceCargas(){
+  const monday = mondayOf(document.getElementById('weekStart').value);
+  const idx = new Map();
+  if(!pares || !monday) return idx;
   pares.forEach(r => {
     if(r.arriboOffset === null) return;
     const fc = fechaDesde(monday, r.cargaOffset);
     const fa = fechaDesde(monday, r.arriboOffset);
     if(!fc || !fa) return;
-    const delta = difDias(fc, fechaSalida);
-    if(delta < 0) return;                       // cargas anteriores a la salida: no aplican
     const k = normCT(r.ct);
-    const prev = mapa.get(k);
-    // se prefiere la carga del día exacto; si no, la más próxima posterior
-    if(!prev || delta < prev.delta || (delta === prev.delta && fa < prev.arribo)){
-      mapa.set(k, { ct: r.ct, carga: fc, arribo: fa, hora: r.arriboHora, delta, exacta: delta === 0 });
+    if(!idx.has(k)) idx.set(k, []);
+    idx.get(k).push({ ct: r.ct, carga: fc, arribo: fa, hora: r.arriboHora });
+  });
+  idx.forEach(lista => lista.sort((a,b) => a.carga - b.carga || a.arribo - b.arribo));
+  return idx;
+}
+
+/* Arribo del CT para el viaje que sale en la fecha indicada.
+   Si ese CT no carga ese día, se toma la siguiente salida disponible. */
+function arriboDeCT(idx, ctNombre, fechaSalida){
+  if(!ctNombre || !fechaSalida) return null;
+  const lista = idx.get(normCT(ctNombre));
+  if(!lista || !lista.length) return null;
+  let mejor = null;
+  lista.forEach(c => {
+    const delta = difDias(c.carga, fechaSalida);
+    if(delta < 0) return;                       // cargas anteriores a la salida: no aplican
+    if(!mejor || delta < mejor.delta || (delta === mejor.delta && c.arribo < mejor.arribo)){
+      mejor = { ...c, delta, exacta: delta === 0 };
     }
   });
-  return mapa;
+  return mejor;
 }
 
 function renderCruce(){
@@ -647,13 +668,16 @@ function renderCruce(){
   const fSalidaStr = document.getElementById('salidaDate').value;
   const [sy,sm,sd] = (fSalidaStr || '').split('-').map(Number);
   const fechaSalida = fSalidaStr ? new Date(sy, sm-1, sd) : null;
-  const arribos = arribosPorCT(fechaSalida);
+  const idx = indiceCargas();
 
   const filas = planIsos
     .filter(x => x.facility !== FACILITY_EXCLUIDO)
     .map(x => {
       const ctNombre = CT_POR_FACILITY[x.facility] || '';
-      const a = ctNombre ? arribos.get(normCT(ctNombre)) : null;
+      // Valparaíso sale el mismo día del picking; el resto, en la fecha de salida indicada
+      const conPicking = saleConPicking(ctNombre);
+      const salidaIso = (conPicking && x.picking) ? x.picking : fechaSalida;
+      const a = ctNombre ? arriboDeCT(idx, ctNombre, salidaIso) : null;
       const holgura = (a && x.promesa) ? difDias(x.promesa, a.arribo) : null;
       let estado;
       if(!ctNombre)        estado = 'sin-ct';        // facility fuera del maestro
@@ -662,7 +686,7 @@ function renderCruce(){
       else if(holgura > 0) estado = 'ok';            // promesa posterior al arribo
       else                 estado = 'riesgo';
       return { ...x, ctNombre, arribo: a ? a.arribo : null, cargaCT: a ? a.carga : null,
-               exacta: a ? a.exacta : false, holgura, estado };
+               exacta: a ? a.exacta : false, salidaIso, conPicking, holgura, estado };
     });
 
   const nOk     = filas.filter(f => f.estado === 'ok').length;
@@ -695,6 +719,7 @@ function renderCruce(){
       <td class="fecha">${esc(f.facility)}</td>
       <td class="ct">${esc(f.ctNombre || '—')}</td>
       <td class="fecha">${f.picking ? fmtFecha(f.picking) : '<span class="sin-dato">—</span>'}</td>
+      <td class="fecha">${f.salidaIso ? fmtFecha(f.salidaIso) : '<span class="sin-dato">—</span>'}${f.conPicking ? ' <span class="tag tag-sd" style="font-size:9px;padding:1px 6px">picking</span>' : ''}</td>
       <td class="fecha">${f.promesa ? fmtFecha(f.promesa) : '<span class="sin-dato">—</span>'}</td>
       <td class="fecha-arribo">${f.arribo ? fmtFecha(f.arribo) : '<span class="sin-dato">—</span>'}</td>
       <td class="lag ${f.holgura === null ? '' : (f.holgura > 0 ? 'lag-0' : 'lag-4')}">${f.holgura !== null ? (f.holgura > 0 ? '+' : '') + f.holgura : '—'}</td>
@@ -707,7 +732,9 @@ function renderCruce(){
   if(nSinCT)  avisos.push(`${nSinCT} ISO(s) con un facility que no está en la tabla CT × Facility.`);
   if(nSinArr) avisos.push(`${nSinArr} ISO(s) en CT que no tienen carga IKEA en el circuito cargado.`);
   const noExacta = vista.filter(f => f.arribo && !f.exacta).length;
-  if(noExacta) avisos.push(`${noExacta} ISO(s) usan la siguiente salida disponible: su CT no carga el ${fechaSalida ? fmtFecha(fechaSalida) : 'día indicado'}.`);
+  if(noExacta) avisos.push(`${noExacta} ISO(s) usan la siguiente salida disponible: su CT no carga la fecha de salida que les corresponde.`);
+  const nPicking = vista.filter(f => f.conPicking && f.picking).length;
+  if(nPicking) avisos.push(`${nPicking} ISO(s) de CT Valparaíso calculan su arribo desde la fecha de picking, porque salen ese mismo día.`);
 
   el.innerHTML = `
     <div class="kpis">
@@ -742,12 +769,12 @@ function renderCruce(){
         <table>
           <thead><tr>
             <th>ISO</th><th>Facility</th><th>CT Destino</th>
-            <th>Fecha picking</th><th>Fecha promesa</th><th>Fecha arribo</th>
+            <th>Fecha picking</th><th>Fecha salida</th><th>Fecha promesa</th><th>Fecha arribo</th>
             <th style="text-align:center">Holgura</th>
             <th>Estado</th><th>Comuna</th>
             <th style="text-align:center">Líneas</th>
           </tr></thead>
-          <tbody>${cuerpo || '<tr><td colspan="10" style="padding:20px;text-align:center;color:var(--textFaint)">Sin ISOs para este filtro</td></tr>'}</tbody>
+          <tbody>${cuerpo || '<tr><td colspan="11" style="padding:20px;text-align:center;color:var(--textFaint)">Sin ISOs para este filtro</td></tr>'}</tbody>
         </table>
       </div>
     </div>`;
@@ -764,7 +791,7 @@ function buildOutlookCruce(filas){
   const etiqueta = { ok:'Llega antes', riesgo:'En riesgo', 'sin-promesa':'Sin promesa',
                      'sin-arribo':'CT sin carga IKEA', 'sin-ct':'Facility sin CT' };
   let html = '<table id="tbl-cruce" style="border-collapse:collapse;font-family:Aptos,sans-serif;">';
-  html += `<thead><tr>${['ISO','Facility','CT Destino','Fecha picking','Fecha promesa','Fecha arribo','Holgura','Estado','Comuna']
+  html += `<thead><tr>${['ISO','Facility','CT Destino','Fecha picking','Fecha salida','Fecha promesa','Fecha arribo','Holgura','Estado','Comuna']
     .map(h => `<th style="${thS}">${h}</th>`).join('')}</tr></thead><tbody>`;
   filas.forEach(f => {
     const bg = f.estado === 'ok' ? '#dcfce7' : f.estado === 'riesgo' ? '#fee2e2' : '#ffffff';
@@ -773,6 +800,7 @@ function buildOutlookCruce(filas){
       `<td style="${tdS}">${esc(f.facility)}</td>` +
       `<td style="${tdS}text-align:left;">${esc(f.ctNombre || '')}</td>` +
       `<td style="${tdS}">${f.picking ? fmtFecha(f.picking) : ''}</td>` +
+      `<td style="${tdS}">${f.salidaIso ? fmtFecha(f.salidaIso) : ''}</td>` +
       `<td style="${tdS}">${f.promesa ? fmtFecha(f.promesa) : ''}</td>` +
       `<td style="${tdS}font-weight:bold;">${f.arribo ? fmtFecha(f.arribo) : ''}</td>` +
       `<td style="${tdS}">${f.holgura !== null ? f.holgura : ''}</td>` +
@@ -803,10 +831,11 @@ function exportCruce(){
   if(!filas || !filas.length) return;
   const etiqueta = { ok:'Llega antes', riesgo:'En riesgo', 'sin-promesa':'Sin promesa',
                      'sin-arribo':'CT sin carga IKEA', 'sin-ct':'Facility sin CT' };
-  const aoa = [['ISO','Facility','CT Destino','Fecha picking','Fecha promesa','Fecha carga CT','Fecha arribo','Holgura (días)','Estado','Comuna','Route','Líneas']];
+  const aoa = [['ISO','Facility','CT Destino','Fecha picking','Fecha salida','Fecha promesa','Fecha carga CT','Fecha arribo','Holgura (días)','Estado','Comuna','Route','Líneas']];
   filas.forEach(f => aoa.push([
     f.iso, f.facility, f.ctNombre,
     f.picking ? fmtFecha(f.picking) : '',
+    f.salidaIso ? fmtFecha(f.salidaIso) : '',
     f.promesa ? fmtFecha(f.promesa) : '',
     f.cargaCT ? fmtFecha(f.cargaCT) : '',
     f.arribo ? fmtFecha(f.arribo) : '',
