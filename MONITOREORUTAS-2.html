@@ -1345,6 +1345,8 @@ const MINI_THRESHOLD = 45; // (referencial) umbral histórico por cantidad de IS
 function esVehMini(name){ return /MINI/.test(cleanStr(name)); }
 /* Mono se determina por el nombre del vehículo (MONO01, MONO02…) */
 function esVehMono(name){ return /MONO/.test(cleanStr(name)); }
+/* Auxiliares: quedan fuera de Camión y se informan aparte */
+function esVehAux(name){ return getVehType(name)==='VAUX'; }
 /* Los MONO (ex VEH60–VEH80) cuentan como vehículos teóricos, igual que VEH y MINI. */
 function esVehTeorico(name){
   const u=cleanStr(name);
@@ -1388,15 +1390,19 @@ function renderIsosXCamion(){
   const isosOf=v=>v.total||0;
   const miniVehs=rmVehs.filter(v=>esVehMini(v.vehFinal));
   const monoVehs=rmVehs.filter(v=>esVehMono(v.vehFinal));
-  const camVehs=rmVehs.filter(v=>!esVehMini(v.vehFinal)&&!esVehMono(v.vehFinal));
+  const auxVehs =rmVehs.filter(v=>esVehAux(v.vehFinal));
+  // Camión = el resto: sin Mini, sin Mono y sin auxiliares
+  const camVehs=rmVehs.filter(v=>!esVehMini(v.vehFinal)&&!esVehMono(v.vehFinal)&&!esVehAux(v.vehFinal));
   const isosReal=rmVehs.reduce((a,v)=>a+isosOf(v),0);
   const isosMini=miniVehs.reduce((a,v)=>a+isosOf(v),0);
   const isosMono=monoVehs.reduce((a,v)=>a+isosOf(v),0);
+  const isosAux =auxVehs.reduce((a,v)=>a+isosOf(v),0);
   const isosCam=camVehs.reduce((a,v)=>a+isosOf(v),0);
   const fmtCL=n=>n.toFixed(2).replace('.',',');
   const ixcReal=rmVehs.length?fmtCL(isosReal/rmVehs.length):'0,00';
   const ixMini=miniVehs.length?fmtCL(isosMini/miniVehs.length):'0,00';
   const ixMono=monoVehs.length?fmtCL(isosMono/monoVehs.length):'0,00';
+  const ixAux =auxVehs.length?fmtCL(isosAux/auxVehs.length):'0,00';
   const ixCam=camVehs.length?fmtCL(isosCam/camVehs.length):'0,00';
   // Fecha desde el archivo de Planificación SimpliRoute (primer ETA con fecha)
   let planDate=null;
@@ -1439,7 +1445,7 @@ function renderIsosXCamion(){
     <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px">
       <div style="overflow-x:auto">
         <table style="width:100%;font-size:11px;font-family:var(--font-mono);border-collapse:collapse">
-          <thead><tr style="background:var(--bgCardAlt)">${['Fecha','Vehiculos','ISOs real','IxC real','ISOs teo.','IxC teo.','Mini','ISOs mini','IxMini','Camion','ISOs camion','IxCam','MONO','ISOs MONO','IxMONO','AÑO','WEEK','Veh teo.','Veh adicionales'].map(th).join('')}</tr></thead>
+          <thead><tr style="background:var(--bgCardAlt)">${['Fecha','Vehiculos','ISOs real','IxC real','ISOs teo.','IxC teo.','Mini','ISOs mini','IxMini','Camion','ISOs camion','IxCam','MONO','ISOs MONO','IxMONO','AÑO','WEEK','Veh teo.','Veh adicionales','ISOs AUX','IxAUX'].map(th).join('')}</tr></thead>
           <tbody><tr style="text-align:center;font-weight:700">
             ${td(fecha)}${td(rmVehs.length)}${td(isosReal,'font-weight:900;color:#0ea5e9')}${td(ixcReal)}
             ${td(isosTeo,'background:rgba(0,0,0,0.03);font-weight:900;color:#16a34a')}${td(ixcTeo,'background:rgba(0,0,0,0.03)')}
@@ -1449,6 +1455,7 @@ function renderIsosXCamion(){
             ${td(anio)}${td(week,'font-family:var(--font-mono)')}
             ${td(vehTeo,'background:rgba(0,0,0,0.03)')}
             ${td(vehTeo==='-'?'-':rmVehs.length-vehTeo,'font-weight:900;color:'+(vehTeo!=='-'&&rmVehs.length-vehTeo>0?'#dc2626':'var(--text)'))}
+            ${td(isosAux,'color:#64748b')}${td(ixAux,'color:#64748b')}
           </tr></tbody>
         </table>
       </div>
@@ -1474,8 +1481,9 @@ function renderIsosXCamion(){
       <div class="card" style="padding:24px;display:flex;flex-direction:column;justify-content:center">
         <div style="display:flex;flex-direction:column;gap:16px">
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px"><span style="color:var(--textSub)">Criterio Mini:</span><span style="font-weight:700;text-decoration:underline;color:#a855f7">Nombre MINI en el plan</span></div>
-          <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px"><span style="color:var(--textSub)">Criterio Camión:</span><span style="font-weight:700;text-decoration:underline;color:#f97316">Resto de la flota RM</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px"><span style="color:var(--textSub)">Criterio Camión:</span><span style="font-weight:700;text-decoration:underline;color:#f97316">Resto de la flota RM, sin AUX</span></div>
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px"><span style="color:var(--textSub)">Criterio Mono:</span><span style="font-weight:700;text-decoration:underline;color:#0d9488">Nombre MONO en el plan</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px"><span style="color:var(--textSub)">Criterio AUX:</span><span style="font-weight:700;text-decoration:underline;color:#64748b">Vehículo auxiliar (AUX)</span></div>
           <div style="padding-top:16px;border-top:1px dashed rgba(0,0,0,0.1)"></div>
           <p style="font-size:10px;line-height:1.6;color:var(--textFaint);font-style:italic;text-align:center">"La eficiencia se mide en la capacidad de carga optimizada por tipología de vehículo."</p>
         </div>
@@ -1488,7 +1496,8 @@ function renderIsosXCamion(){
       isosTeo==='-'?'':isosTeo, ixcTeo==='-'?'':ixcTeo,
       miniVehs.length,isosMini,ixMini,camVehs.length,isosCam,ixCam,
       monoVehs.length,isosMono,ixMono,
-      anio,week, vehTeo==='-'?'':vehTeo, vehAdic];
+      anio,week, vehTeo==='-'?'':vehTeo, vehAdic,
+      isosAux, ixAux];
     navigator.clipboard.writeText(row.join('\t'))
       .then(()=>showToast('✓ Datos copiados (Info solamente)'))
       .catch(()=>showToast('Error al copiar','error'));
