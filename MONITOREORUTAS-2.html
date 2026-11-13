@@ -1347,6 +1347,8 @@ function esVehMini(name){ return /MINI/.test(cleanStr(name)); }
 function esVehMono(name){ return /MONO/.test(cleanStr(name)); }
 /* Auxiliares: quedan fuera de Camión y se informan aparte */
 function esVehAux(name){ return getVehType(name)==='VAUX'; }
+/* Proyectos y Postventa quedan fuera de todas las categorías del indicador */
+function esVehExcluido(name){ const t=getVehType(name); return t==='VPR'||t==='VPV'; }
 /* Los MONO (ex VEH60–VEH80) cuentan como vehículos teóricos, igual que VEH y MINI. */
 function esVehTeorico(name){
   const u=cleanStr(name);
@@ -1361,7 +1363,10 @@ function renderIsosXCamion(){
     return;
   }
   const kpi=getKPI();
-  const allVehs=Object.values(kpi.vehicles);
+  // VPR (Proyectos) y VPV (Postventa) no entran en ninguna categoría del indicador
+  const todos=Object.values(kpi.vehicles);
+  const nExcluidos=todos.filter(v=>esVehExcluido(v.vehFinal)).length;
+  const allVehs=todos.filter(v=>!esVehExcluido(v.vehFinal));
   const hasRegionInfo=allVehs.some(v=>v.region);
   const rmVehs=hasRegionInfo
     ? allVehs.filter(v=>cleanStr(v.region).includes('METROPOLITANA'))
@@ -1441,7 +1446,8 @@ function renderIsosXCamion(){
   const td=(v,extra='')=>`<td style="padding:16px;border-bottom:1px solid var(--borderSoft);${extra}">${v}</td>`;
   const maxBar=Math.max(miniVehs.length,camVehs.length,monoVehs.length,1);
 
-  el.innerHTML=hdrHtml(hasRegionInfo?'Cálculo exclusivo Región Metropolitana':'Sin información de región · mostrando toda la flota')+`
+  const sufijoExcl=nExcluidos?` · ${nExcluidos} VPR/VPV excluidos`:'';
+  el.innerHTML=hdrHtml((hasRegionInfo?'Cálculo exclusivo Región Metropolitana':'Sin información de región · mostrando toda la flota')+sufijoExcl)+`
     <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px">
       <div style="overflow-x:auto">
         <table style="width:100%;font-size:11px;font-family:var(--font-mono);border-collapse:collapse">
@@ -1484,6 +1490,7 @@ function renderIsosXCamion(){
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px"><span style="color:var(--textSub)">Criterio Camión:</span><span style="font-weight:700;text-decoration:underline;color:#f97316">Resto de la flota RM, sin AUX</span></div>
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px"><span style="color:var(--textSub)">Criterio Mono:</span><span style="font-weight:700;text-decoration:underline;color:#0d9488">Nombre MONO en el plan</span></div>
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px"><span style="color:var(--textSub)">Criterio AUX:</span><span style="font-weight:700;text-decoration:underline;color:#64748b">Vehículo auxiliar (AUX)</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px"><span style="color:var(--textSub)">Excluidos:</span><span style="font-weight:700;text-decoration:underline;color:var(--textFaint)">VPR Proyectos y VPV Postventa</span></div>
           <div style="padding-top:16px;border-top:1px dashed rgba(0,0,0,0.1)"></div>
           <p style="font-size:10px;line-height:1.6;color:var(--textFaint);font-style:italic;text-align:center">"La eficiencia se mide en la capacidad de carga optimizada por tipología de vehículo."</p>
         </div>
