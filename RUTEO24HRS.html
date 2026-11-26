@@ -363,18 +363,34 @@
     function colTipoVisita(){ return findCol(state.dataF1[0]||{},['TIPO_VISITA','TIPO VISITA','VISIT_TYPE','TIPOVISITA'])||'TIPO_VISITA'; }
     function colMiniTicket(){ return findCol(state.dataF1[0]||{},['MINI_TICKET','MINI TICKET','MINITICKET','MINI'])||'MINI_TICKET'; }
     function colCounty(){ return findCol(state.dataF1[0]||{},['D_COUNTY','D COUNTY','COUNTY','COMUNA'])||'D_COUNTY'; }
+    function colZona(){ return findCol(state.dataF1[0]||{},['ZONA_ALMACENAMIENTO','ZONA ALMACENAMIENTO','ZONA_ALM','ZONA'])||'ZONA_ALMACENAMIENTO'; }
     function esProyOPost(r){ const t=normVal(r[colTipoVisita()]); return t==='PROJECT'||t==='POST_SALES'; }
     function esValorMini(v){ const n=normVal(v); return n!==''&&!n.startsWith('NO')&&n.includes('MINI'); }
     function comunaDe(r){ return r[colCounty()]||r['CONDUCTOR']||r['Conductor']||''; }
-    function esFilaMini(r){
+    /* Mini base: mini_ticket + comuna mini. La regla final descuenta los Mono. */
+    function esMiniBase(r){
       if(esProyOPost(r)) return false;
       if(!esValorMini(r[colMiniTicket()])) return false;
       return esComunaMini(comunaDe(r));
     }
+    /* Zona de almacenamiento RCK */
+    function esZonaRCK(r){ return normVal(r[colZona()]).toUpperCase()==='RCK'; }
+    /* Mono Ticket: clasificación E1 + zona RCK, sin importar si es mini ticket.
+       Tiene prioridad sobre Mini. */
+    function esFilaMono(r,col){
+      if(esProyOPost(r)) return false;
+      if(!col||clasifDe(r,col)!=='E1') return false;
+      return esZonaRCK(r);
+    }
+    /* Mini final: mini base que no sea Mono */
+    function esFilaMini(r){
+      if(!esMiniBase(r)) return false;
+      return !esFilaMono(r,getClasifCol());
+    }
     /* Columna de clasificación E1/E2/E3: nombre conocido o auto-detección por valores */
     function getClasifCol(){
       if(!state.dataF1||!state.dataF1.length) return null;
-      const byName=findCol(state.dataF1[0],['CLASIFICACION','CLASIFICACIÓN','CLASIF','CLASIFICACION_E','CLASIFICACION E','CATEGORIA','CATEGORÍA','TIPO_E','E']);
+      const byName=findCol(state.dataF1[0],['TIPO','CLASIFICACION','CLASIFICACIÓN','CLASIF','CLASIFICACION_E','CLASIFICACION E','CATEGORIA','CATEGORÍA','TIPO_E','E']);
       const esE=v=>/^E\d$/.test(String(v||'').trim().toUpperCase());
       if(byName&&state.dataF1.some(r=>esE(r[byName]))) return byName;
       let best=null,bestPct=0;
@@ -605,21 +621,18 @@
         rows = state.dataF1.filter(esFilaMini);
         name = `RUTEAR MINI TICKET ${getFechaMañana()}.xlsx`;
       } else if (type === 'mono') {
-        // E1, no mini, en comunas mini
+        // E1 + zona RCK, sin importar si es mini ticket
         const col = getClasifCol();
         if (!col) { addLog('No se encontró la columna de clasificación (E1/E2/E3) en el archivo', 'err'); return; }
-        rows = state.dataF1.filter(r => {
-          if (esProyOPost(r) || esFilaMini(r)) return false;
-          if (clasifDe(r, col) !== 'E1') return false;
-          return esComunaMini(comunaDe(r));
-        });
+        rows = state.dataF1.filter(r => esFilaMono(r, col));
         name = `RUTEAR MONO TICKET ${getFechaMañana()}.xlsx`;
       } else if (type === 'regular') {
-        // Resto: no Proyectos/Post Sales, no Mini, no Mono
+        // Resto: no Proyectos/Post Sales, no Mono, no Mini
         const col = getClasifCol();
         rows = state.dataF1.filter(r => {
-          if (esProyOPost(r) || esFilaMini(r)) return false;
-          if (col && clasifDe(r, col) === 'E1' && esComunaMini(comunaDe(r))) return false;
+          if (esProyOPost(r)) return false;
+          if (esFilaMono(r, col)) return false;
+          if (esFilaMini(r)) return false;
           return true;
         });
         name = `RUTEAR TICKET ${getFechaMañana()}.xlsx`;
